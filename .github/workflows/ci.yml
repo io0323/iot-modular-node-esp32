@@ -1,0 +1,81 @@
+name: ci
+
+# すべてのブランチへの push で動かす（PR の画面には同じコミットの結果が出る）。PR を作る前に CI の合格を確かめるため
+on:
+  push:
+
+jobs:
+  host:
+    name: host（ビルド・CTest・契約テスト）
+    runs-on: ubuntu-24.04
+    env:
+      IOTSPEC_MQTT_URL: mqtt://localhost:1883
+      IOTSPEC_MQTT_PASSWORD: ci-${{ github.run_id }}
+      # ASan・UBSan の指摘はファイルに出し、最後の手順で1件でもあれば失敗にする
+      ASAN_OPTIONS: log_path=${{ github.workspace }}/sanitizer/asan:detect_leaks=1
+      UBSAN_OPTIONS: log_path=${{ github.workspace }}/sanitizer/ubsan:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ツール
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build
+          mkdir -p sanitizer
+          cmake --version | head -1
+          g++ --version | head -1
+
+      - name: ビルド（host-debug）
+        run: |
+          cmake --preset host-debug
+          cmake --build --preset host-debug 2>&1 | tee build.log
+          if grep -E "warning:" build.log; then echo "::error::ビルドに警告がある"; exit 1; fi
+
+      - name: CTest
+        run: ctest --preset host-debug --output-on-failure
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Mosquitto（ACL・パスワード付き）
+        # services: は使わない（サービスコンテナはリポジトリを取り出す前に起動するので設定ファイルを渡せない。contract-tests.md 第4章）
+        run: |
+          external/iot-common-spec/deploy/mosquitto/gen_passwd.sh
+          docker compose -f external/iot-common-spec/docker-compose.yml up -d mosquitto
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/1883) 2>/dev/null; then echo "port 1883 open"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::Mosquitto のポート 1883 が開かない"; exit 1
+
+      - name: 契約テストキット（iot-common-spec v0.2.1）
+        run: |
+          uv tool install "iotspec @ git+https://github.com/io0323/iot-common-spec@v0.2.1"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: 契約テスト（--role mcu-cpp-01）
+        run: iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host/mcu_cpp_01 --log contract-log.jsonl" --junit contract.xml
+
+      - name: ASan・UBSan の指摘がないこと
+        if: always()
+        run: |
+          if ls sanitizer/* >/dev/null 2>&1; then cat sanitizer/*; echo "::error::サニタイザーの指摘がある"; exit 1; fi
+          echo "サニタイザーの指摘なし"
+
+      - name: Mosquitto のログ
+        if: always()
+        run: docker compose -f external/iot-common-spec/docker-compose.yml logs mosquitto > mosquitto.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract
+          path: |
+            contract.xml
+            contract-log.jsonl
+            mosquitto.log
+            sanitizer/
+          if-no-files-found: warn

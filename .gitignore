@@ -1,0 +1,8 @@
+/build/
+/.cache/
+compile_commands.json
+*.jsonl
+contract*.xml
+.DS_Store
+.vscode/
+.idea/
