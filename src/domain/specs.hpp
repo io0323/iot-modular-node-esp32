@@ -23,6 +23,10 @@ struct ActuatorSpec {
   /// 連続出力の上限秒（state の max_on_s。上限がなければ std::nullopt で、state では null）。
   /// lease_s がこれを超える指令は、受けた時点で limited にする（共通仕様 v0.2.1 #27）
   std::optional<std::uint16_t> max_on_s{};
+  /// 最小オン時間・最小オフ時間（ms）。この間は 0 と 0 より大きい値の切り替えを待たせる（P3 の決定 #47、#59）。
+  /// インターロックの強制値・上限はこれより優先する。既定はどの機器もなし
+  std::optional<std::uint32_t> min_on_ms{};
+  std::optional<std::uint32_t> min_off_ms{};
 };
 
 /// @brief 計測値。値は 1/1000 単位の固定小数で持つ。

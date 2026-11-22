@@ -8,6 +8,7 @@
 #include "domain/interlock.hpp"
 #include "domain/rule.hpp"
 #include "domain/specs.hpp"
+#include "domain/ui.hpp"
 #include "support/result.hpp"
 
 namespace node::domain {
@@ -62,18 +63,21 @@ class DeviceRegistry {
   /// @param sensors センサーへのポインタの並び（寿命はプログラム全体）
   /// @param actuators アクチュエーターとインターロックの組の並び（寿命はプログラム全体）
   /// @param rules ローカルルールの並び（寿命はプログラム全体）
+  /// @param ui 本体の UI の機器（ボタン・OLED。なければ空）
   DeviceRegistry(std::span<ISensor* const> sensors, std::span<const ActuatorBinding> actuators,
-                 std::span<const Rule> rules = {})
-      : sensors_(sensors), actuators_(actuators), rules_(rules) {}
+                 std::span<const Rule> rules = {}, UiDevices ui = {})
+      : sensors_(sensors), actuators_(actuators), rules_(rules), ui_(ui) {}
 
   [[nodiscard]] std::span<ISensor* const> sensors() const { return sensors_; }
   [[nodiscard]] std::span<const ActuatorBinding> actuators() const { return actuators_; }
   [[nodiscard]] std::span<const Rule> rules() const { return rules_; }
+  [[nodiscard]] const UiDevices& ui() const { return ui_; }
 
  private:
   std::span<ISensor* const> sensors_;
   std::span<const ActuatorBinding> actuators_;
   std::span<const Rule> rules_;
+  UiDevices ui_;
 };
 
 }  // namespace node::domain
