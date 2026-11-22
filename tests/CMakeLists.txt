@@ -22,6 +22,10 @@ node_add_test(unit_interlock unit/interlock_test.cpp)
 node_add_test(unit_rule_engine unit/rule_engine_test.cpp)
 node_add_test(unit_mode_manager unit/mode_manager_test.cpp)
 node_add_test(unit_sensor_poller unit/sensor_poller_test.cpp)
+node_add_test(unit_bme280 unit/bme280_test.cpp)
+node_add_test(unit_drivers unit/drivers_test.cpp)
+node_add_test(unit_ui_service unit/ui_service_test.cpp)
 
 # ホスト結合テスト（FakeMqttLink と仮想時計でアプリ全体を動かす）
 node_add_test(integration_node integration/node_test.cpp)
+node_add_test(integration_node_fakehw integration/node_fakehw_test.cpp)
