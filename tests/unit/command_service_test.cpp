@@ -4,6 +4,8 @@
 #include <string>
 
 #include "app/command_service.hpp"
+#include "config/devices.hpp"
+#include "domain/pump_interlock.hpp"
 #include "drivers/sim/sim_sensor.hpp"
 #include "support/fakes.hpp"
 
@@ -15,19 +17,28 @@ using test::json_value;
 using test::make_cmd;
 using test::ulid;
 
-constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}, {}};
-constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}, "soil"};
-constexpr ActuatorSpec kLed{"led_grow", 0, 500, {}, {}};
+constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}};
+constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}};
+constexpr ActuatorSpec kLed{"led_grow", 0, 500, {}};
 
 class CommandServiceTest : public ::testing::Test {
  protected:
   drivers::SimActuator fan{kFan};
   drivers::SimActuator pump{kPump};
   drivers::SimActuator led{kLed};
-  std::array<domain::IActuator*, 3> list{&fan, &pump, &led};
-  ControlArbiter arbiter{list};
   domain::ReadingStore store{};
-  CommandService svc{arbiter, store};
+  domain::PumpInterlock pump_max_on{30};
+  domain::SensorFaultInterlock pump_soil{config::kPumpOffOnSoilFault};
+  std::array<domain::IInterlock*, 2> pump_interlocks{&pump_max_on, &pump_soil};
+  std::array<domain::ActuatorBinding, 3> list{{{&fan, {}}, {&pump, pump_interlocks}, {&led, {}}}};
+  ControlArbiter arbiter{list, store};
+  ModeManager modes{};
+  CommandService svc{arbiter, modes};
+
+  void SetUp() override {
+    ASSERT_TRUE(store.set_period("soil", 10000));
+    ASSERT_TRUE(store.update({"soil", 40000, domain::Unit::Pct, domain::Quality::Good}, now_ms));
+  }
   std::uint64_t now_ms{1000};
   std::int64_t now_utc{*infra::parse_ts("2026-11-20T06:00:12.345Z")};
 
@@ -65,8 +76,14 @@ TEST_F(CommandServiceTest, LeaseOverMaxOnIsLimitedAtReceipt) {
   EXPECT_EQ(json_value(o3.ack_payload.view(), "limited"), "false");
 }
 
+TEST_F(CommandServiceTest, PumpRejectedUnsafeWhileSoilStale) {
+  now_ms += 30'001;  // 周期10000の3倍を超えた
+  const auto o = run(make_cmd(ulid(43), "set_actuator", R"({"id":"pump","level":500})", "auto", R"("lease_s":10)"));
+  EXPECT_EQ(reason(o), "unsafe");
+}
+
 TEST_F(CommandServiceTest, PumpRejectedUnsafeWhileSoilFault) {
-  ASSERT_TRUE(store.update({"soil", 40000, domain::Unit::Pct, domain::Quality::Fault}));
+  ASSERT_TRUE(store.mark_fault("soil", now_ms));
   const auto o = run(make_cmd(ulid(6), "set_actuator", R"({"id":"pump","level":500})", "auto", R"("lease_s":10)"));
   EXPECT_EQ(status(o), "rejected");
   EXPECT_EQ(reason(o), "unsafe");
@@ -87,14 +104,15 @@ TEST_F(CommandServiceTest, ReleaseDone) {
 TEST_F(CommandServiceTest, SetModeDoneAndRequestsStateAndEvent) {
   const auto o = run(make_cmd(ulid(10), "set_mode", R"({"mode":"power_save"})"));
   EXPECT_EQ(status(o), "done");
-  EXPECT_TRUE(o.republish_state);
-  ASSERT_TRUE(o.mode_changed_to.has_value());
-  EXPECT_EQ(*o.mode_changed_to, domain::Mode::PowerSave);
-  EXPECT_EQ(svc.mode(), domain::Mode::PowerSave);
+  ASSERT_TRUE(o.mode_change.has_value());
+  EXPECT_EQ(o.mode_change->from, domain::Mode::Auto);
+  EXPECT_EQ(o.mode_change->to, domain::Mode::PowerSave);
+  EXPECT_EQ(o.mode_change->cause, ModeCause::Cmd);
+  EXPECT_EQ(modes.mode(), domain::Mode::PowerSave);
   // 同じモードへは done だけ（open-questions #18）
   const auto same = run(make_cmd(ulid(11), "set_mode", R"({"mode":"power_save"})"));
   EXPECT_EQ(status(same), "done");
-  EXPECT_FALSE(same.mode_changed_to.has_value());
+  EXPECT_FALSE(same.mode_change.has_value());
   EXPECT_FALSE(same.republish_state);
 }
 
@@ -102,14 +120,14 @@ TEST_F(CommandServiceTest, SetModeUnknownValueIsInvalidArg) {
   const auto o = run(make_cmd(ulid(12), "set_mode", R"({"mode":"eco"})"));
   EXPECT_EQ(status(o), "rejected");
   EXPECT_EQ(reason(o), "invalid_arg");
-  EXPECT_EQ(svc.mode(), domain::Mode::Auto);
+  EXPECT_EQ(modes.mode(), domain::Mode::Auto);
 }
 
 TEST_F(CommandServiceTest, GetStatusRepublishesState) {
   const auto o = run(make_cmd(ulid(13), "get_status", ""));
   EXPECT_EQ(status(o), "done");
   EXPECT_TRUE(o.republish_state);
-  EXPECT_FALSE(o.mode_changed_to.has_value());
+  EXPECT_FALSE(o.mode_change.has_value());
 }
 
 TEST_F(CommandServiceTest, SetParamAndUnknownOpAreUnknownOp) {

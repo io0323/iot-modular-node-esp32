@@ -25,8 +25,8 @@ constexpr std::array<ChannelSpec, 2> kFastCh{{{"lux", Unit::Lux, 1000}, {"temp_a
 constexpr std::array<std::int32_t, 2> kFastVal{300000, 25000};
 constexpr std::array<ChannelSpec, 1> kSlowCh{{{"soil", Unit::Pct, 10000}}};
 constexpr std::array<std::int32_t, 1> kSlowVal{40000};
-constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}, {}};
-constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}, "soil"};
+constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}};
+constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}};
 
 class ServicesTest : public ::testing::Test {
  protected:
@@ -43,9 +43,9 @@ class ServicesTest : public ::testing::Test {
   std::array<domain::ISensor*, 2> sensors{&fast, &slow};
   drivers::SimActuator fan{kFan};
   drivers::SimActuator pump{kPump};
-  std::array<domain::IActuator*, 2> actuators{&fan, &pump};
-  ControlArbiter arbiter{actuators};
   domain::ReadingStore store{};
+  std::array<domain::ActuatorBinding, 2> actuators{{{&fan, {}}, {&pump, {}}}};
+  ControlArbiter arbiter{actuators, store};
 
   void SetUp() override {
     link.set_connected(true);
@@ -119,59 +119,39 @@ TEST_F(ServicesTest, PublisherUncountedDoesNotAdvanceSeq) {
 
 // ---- TelemetryService
 
-TEST_F(ServicesTest, TelemetryIncludesDueChannelsAndAllActuators) {
-  TelemetryService t(sensors, arbiter, store);
-  t.start(clock.monotonic_ms());
-  t.tick(clock.monotonic_ms(), pub);  // 最初はすべて計測する
-  auto tel = link.on("telemetry");
+TEST_F(ServicesTest, TelemetryIncludesGivenReadingsAndAllActuators) {
+  TelemetryService t(arbiter);
+  const std::array<domain::Reading, 2> rd{{{"lux", 300000, Unit::Lux, domain::Quality::Good},
+                                           {"soil", 40000, Unit::Pct, domain::Quality::Fault}}};
+  t.publish(rd, pub);
+  const auto tel = link.on("telemetry");
   ASSERT_EQ(tel.size(), 1U);
-  std::string p = payload_of(tel[0].payload);
+  const std::string p = payload_of(tel[0].payload);
   EXPECT_NE(p.find(R"({"channel":"lux","value":300.0,"unit":"lux","quality":"good"})"), std::string::npos);
-  EXPECT_NE(p.find(R"("channel":"soil")"), std::string::npos);
+  EXPECT_NE(p.find(R"({"channel":"soil","value":40.0,"unit":"pct","quality":"fault"})"), std::string::npos);
   EXPECT_NE(p.find(R"({"id":"fan_main","level":0,"owner":"none"})"), std::string::npos);
   EXPECT_NE(p.find(R"({"id":"pump","level":0,"owner":"none"})"), std::string::npos);
-
-  clock.advance(500);
-  t.tick(clock.monotonic_ms(), pub);
-  EXPECT_EQ(link.on("telemetry").size(), 1U);  // まだ周期が来ていない
-
-  clock.advance(500);
-  t.tick(clock.monotonic_ms(), pub);
-  tel = link.on("telemetry");
-  ASSERT_EQ(tel.size(), 2U);
-  p = payload_of(tel[1].payload);
-  EXPECT_NE(p.find(R"("channel":"lux")"), std::string::npos);
-  EXPECT_EQ(p.find(R"("channel":"soil")"), std::string::npos);  // 10秒周期はまだ
-  EXPECT_NE(p.find(R"("id":"pump")"), std::string::npos);       // アクチュエーターは毎回全部
-
-  for (int i = 0; i < 9; ++i) {
-    clock.advance(1000);
-    t.tick(clock.monotonic_ms(), pub);
-  }
-  EXPECT_NE(payload_of(link.on("telemetry").back().payload).find(R"("channel":"soil")"), std::string::npos);
   EXPECT_EQ(tel[0].qos, infra::Qos::AtMostOnce);
 }
 
-TEST_F(ServicesTest, TelemetryReflectsOwnerAndUpdatesStore) {
-  TelemetryService t(sensors, arbiter, store);
-  ControlArbiter::InterlockChanges ch{};
-  (void)arbiter.set_command(0, 640, domain::Priority::Schedule, 60, clock.monotonic_ms(), ch);
-  slow.set_quality(domain::Quality::Fault);
-  t.start(clock.monotonic_ms());
-  t.tick(clock.monotonic_ms(), pub);
-  const std::string tel = link.on("telemetry").back().payload;
-  EXPECT_EQ(test::actuator_in(tel, "fan_main"), std::make_pair(640, std::string("schedule")));
-  ASSERT_TRUE(store.latest("soil").has_value());
-  EXPECT_EQ(store.latest("soil")->quality, domain::Quality::Fault);
+TEST_F(ServicesTest, TelemetryNotSentWithoutReadingsOrWhileDisconnected) {
+  TelemetryService t(arbiter);
+  t.publish({}, pub);
+  EXPECT_TRUE(link.published.empty());
+  link.set_connected(false);
+  const std::array<domain::Reading, 1> rd{{{"lux", 300000, Unit::Lux, domain::Quality::Good}}};
+  t.publish(rd, pub);
+  EXPECT_TRUE(link.published.empty());
 }
 
-TEST_F(ServicesTest, TelemetryNotSentWhileDisconnected) {
-  link.set_connected(false);
-  TelemetryService t(sensors, arbiter, store);
-  t.start(clock.monotonic_ms());
-  t.tick(clock.monotonic_ms(), pub);
-  EXPECT_TRUE(link.published.empty());
-  EXPECT_TRUE(store.latest("lux").has_value());  // 計測は続ける
+TEST_F(ServicesTest, TelemetryReflectsOwner) {
+  TelemetryService t(arbiter);
+  ControlArbiter::InterlockChanges ch{};
+  (void)arbiter.set_command(0, 640, domain::Priority::Schedule, 60, clock.monotonic_ms(), ch);
+  const std::array<domain::Reading, 1> rd{{{"lux", 300000, Unit::Lux, domain::Quality::Good}}};
+  t.publish(rd, pub);
+  EXPECT_EQ(test::actuator_in(link.on("telemetry").back().payload, "fan_main"),
+            std::make_pair(640, std::string("schedule")));
 }
 
 // ---- StateService
@@ -188,9 +168,12 @@ TEST_F(ServicesTest, StatePayloadHasChannelsActuatorsAndFw) {
             R"("actuators":[{"id":"fan_main","min":0,"max":1000,"max_on_s":null},{"id":"pump","min":0,"max":1000,"max_on_s":30}],)"
             R"("fw_version":"0.1"})");
   infra::JsonWriter w2(buf);
-  s.write_payload(w2, false, domain::Mode::PowerSave);
+  s.write_payload(w2, false, domain::Mode::PowerSave, 5);
   EXPECT_EQ(json_value(w2.view(), "status"), "offline");
   EXPECT_EQ(json_value(w2.view(), "mode"), "power_save");
+  // 省電力モードは period_ms も5倍の値
+  EXPECT_NE(w2.view().find(R"({"channel":"lux","unit":"lux","period_ms":5000})"), std::string::npos);
+  EXPECT_NE(w2.view().find(R"({"channel":"soil","unit":"pct","period_ms":50000})"), std::string::npos);
 }
 
 // ---- EventService
@@ -218,6 +201,14 @@ TEST_F(ServicesTest, EventsQueueWhileDisconnectedAndFlushInOrder) {
   EXPECT_EQ(json_value(sent[0].payload, "ts"), "2026-11-20T06:00:13.345Z");  // 発生時刻
   EXPECT_EQ(json_value(sent[1].payload, "code"), "MODE_CHANGED");
   EXPECT_EQ(sent[1].payload.find("detail"), std::string::npos);
+}
+
+TEST_F(ServicesTest, EventChannelIsWrittenWhenGiven) {
+  EventService ev;
+  ASSERT_TRUE(ev.post("SENSOR_FAULT", Severity::Critical, "", env.now(), "temp_air"));
+  ev.flush(pub);
+  const std::string p = payload_of(link.on("event").back().payload);
+  EXPECT_EQ(p, R"({"code":"SENSOR_FAULT","severity":"critical","channel":"temp_air"})");
 }
 
 TEST_F(ServicesTest, EventsOverflowDropsNewest) {

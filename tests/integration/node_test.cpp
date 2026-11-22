@@ -5,8 +5,11 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "app/node.hpp"
+#include "config/devices.hpp"
+#include "domain/pump_interlock.hpp"
 #include "drivers/sim/sim_sensor.hpp"
 #include "support/fakes.hpp"
 
@@ -30,10 +33,10 @@ constexpr std::array<ChannelSpec, 1> kLux{{{"lux", Unit::Lux, 1000}}};
 constexpr std::array<std::int32_t, 1> kLuxVal{300000};
 constexpr std::array<ChannelSpec, 1> kSoil{{{"soil", Unit::Pct, 10000}}};
 constexpr std::array<std::int32_t, 1> kSoilVal{40000};
-constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}, {}};
-constexpr ActuatorSpec kLed{"led_grow", 0, 1000, {}, {}};
-constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}, "soil"};
-constexpr ActuatorSpec kBuzzer{"buzzer", 0, 1000, {}, {}};
+constexpr ActuatorSpec kFan{"fan_main", 0, 1000, {}};
+constexpr ActuatorSpec kLed{"led_grow", 0, 1000, {}};
+constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}};
+constexpr ActuatorSpec kBuzzer{"buzzer", 0, 1000, {}};
 
 constexpr std::string_view kCmdTopic = "iot/v1/home/mcu-cpp-01/cmd";
 
@@ -48,14 +51,41 @@ class NodeTest : public ::testing::Test {
   drivers::SimSensor soil{"soil_moisture", kSoil, kSoilVal, 10000ms};
   std::array<domain::ISensor*, 3> sensors{&bme, &lux, &soil};
   drivers::SimActuator fan{kFan}, led{kLed}, pump{kPump}, buzzer{kBuzzer};
-  std::array<domain::IActuator*, 4> actuators{&fan, &led, &pump, &buzzer};
+  // 構成表（src/config/devices.cpp）と同じインターロックとルール。状態を持つのでテストごとに作る
+  domain::FanTempInterlock fan_temp_high{config::kFanTempHigh};
+  domain::SensorFaultInterlock fan_on_temp_fault{config::kFanOnTempFault};
+  domain::PumpInterlock pump_max_on{config::kPumpMaxOnS};
+  domain::SensorFaultInterlock pump_off_on_soil_fault{config::kPumpOffOnSoilFault};
+  std::array<domain::IInterlock*, 2> fan_interlocks{&fan_temp_high, &fan_on_temp_fault};
+  std::array<domain::IInterlock*, 2> pump_interlocks{&pump_max_on, &pump_off_on_soil_fault};
+  std::array<domain::ActuatorBinding, 4> actuators{
+      {{&fan, fan_interlocks}, {&led, {}}, {&pump, pump_interlocks}, {&buzzer, {}}}};
   std::unique_ptr<Node> node;
 
   void SetUp() override {
     NodeConfig cfg{};
     cfg.password = "secret";
-    node = std::make_unique<Node>(cfg, domain::DeviceRegistry(sensors, actuators), link, clock, rng, log);
+    node = std::make_unique<Node>(cfg, domain::DeviceRegistry(sensors, actuators, config::kRules), link, clock, rng,
+                                  log);
     ASSERT_TRUE(node->start());
+  }
+
+  /// 条件が成り立つまで 10ms 刻みで進める（最大 limit_ms）
+  template <typename Pred>
+  bool run_until(Pred pred, std::uint64_t limit_ms) {
+    for (std::uint64_t t = 0; t < limit_ms; t += 10) {
+      clock.advance(10);
+      node->tick();
+      if (pred()) return true;
+    }
+    return false;
+  }
+  [[nodiscard]] std::vector<test::FakeMqttLink::Published> events_with(std::string_view code) const {
+    std::vector<test::FakeMqttLink::Published> r;
+    for (const auto& e : link.on("event")) {
+      if (json_value(e.payload, "code") == code) r.push_back(e);
+    }
+    return r;
   }
 
   /// 10ms 刻みで ms だけ進める
@@ -165,6 +195,7 @@ TEST_F(NodeTest, PumpLimitedThenStoppedAt30sWithInterlockEvent) {
   EXPECT_EQ(json_value(events[1].payload, "code"), "INTERLOCK_ACTIVE");
   EXPECT_EQ(json_value(events[1].payload, "severity"), "warning");
   EXPECT_EQ(json_value(events[1].payload, "id"), "pump");
+  EXPECT_EQ(json_value(events[1].payload, "rule"), "max_on_s");
   run_for(1000);
   EXPECT_EQ(actuator_in(last_telemetry(), "pump"), std::make_pair(0, std::string("interlock")));
 
@@ -253,6 +284,146 @@ TEST_F(NodeTest, TelemetryCadenceFollowsChannelPeriods) {
   }
   EXPECT_EQ(with_temp, 5);  // 2000ms ごと
   EXPECT_EQ(with_soil, 1);  // 10000ms ごと
+}
+
+// ---- P2 のシナリオ
+
+TEST_F(NodeTest, Scenario1_HighTempForcesFanThenReleasesBackToRule) {
+  run_for(100);
+  bme.set_value(0, 46000);
+  ASSERT_TRUE(run_until([&] { return fan.current() == 1000; }, 2100));
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "fan_main"), std::make_pair(1000, std::string("interlock")));
+  auto active = events_with("INTERLOCK_ACTIVE");
+  ASSERT_EQ(active.size(), 1U);
+  EXPECT_EQ(json_value(active[0].payload, "id"), "fan_main");
+  EXPECT_EQ(json_value(active[0].payload, "rule"), "temp_high");
+  EXPECT_EQ(json_value(active[0].payload, "severity"), "warning");
+
+  bme.set_value(0, 42000);
+  run_for(9000);
+  EXPECT_EQ(fan.current(), 1000);  // 43℃未満がまだ10秒続いていない
+  EXPECT_TRUE(events_with("INTERLOCK_RELEASED").empty());
+  ASSERT_TRUE(run_until([&] { return fan.current() != 1000; }, 4000));
+  const auto released = events_with("INTERLOCK_RELEASED");
+  ASSERT_EQ(released.size(), 1U);
+  EXPECT_EQ(json_value(released[0].payload, "rule"), "temp_high");
+  EXPECT_EQ(events_with("INTERLOCK_ACTIVE").size(), 1U);
+  // ルールの判定に戻る：cool-on-high-temp は 46℃で入り、42℃（28℃以上）では入ったまま
+  EXPECT_EQ(fan.current(), 600);
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "fan_main"), std::make_pair(600, std::string("local")));
+}
+
+TEST_F(NodeTest, Scenario2_DarkTurnsLedOnThenPowerSaveTurnsItOff) {
+  run_for(100);
+  lux.set_value(0, 150000);
+  ASSERT_TRUE(run_until([&] { return led.current() == 1000; }, 1100));
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "led_grow"), std::make_pair(1000, std::string("local")));
+  EXPECT_TRUE(events_with("INTERLOCK_ACTIVE").empty());  // ルールの発火ではイベントを出さない
+
+  send(make_cmd(ulid(20), "set_mode", R"({"mode":"power_save"})"));
+  run_for(10);
+  EXPECT_EQ(node->mode(), domain::Mode::PowerSave);
+  EXPECT_EQ(led.current(), 0);
+  const std::string state = link.on("state").back().payload;
+  EXPECT_EQ(json_value(state, "mode"), "power_save");
+  EXPECT_NE(state.find(R"({"channel":"lux","unit":"lux","period_ms":5000})"), std::string::npos);
+  EXPECT_NE(state.find(R"({"channel":"temp_air","unit":"degC","period_ms":10000})"), std::string::npos);
+  const auto mc = events_with("MODE_CHANGED");
+  ASSERT_EQ(mc.size(), 1U);
+  EXPECT_EQ(json_value(mc[0].payload, "from"), "auto");
+  EXPECT_EQ(json_value(mc[0].payload, "to"), "power_save");
+  EXPECT_EQ(json_value(mc[0].payload, "cause"), "cmd");
+  // 省電力モードの telemetry は5秒ごと。ファンは stale にならない（しきい値も5倍。#39）
+  const auto before = link.on("telemetry").size();
+  run_for(20'000);
+  EXPECT_EQ(link.on("telemetry").size() - before, 4U);
+  EXPECT_EQ(fan.current(), 0);
+  EXPECT_EQ(actuator_in(last_telemetry(), "led_grow"), std::make_pair(0, std::string("none")));
+}
+
+TEST_F(NodeTest, Scenario3_DrySoilPulsesPumpThenSensorFaultMakesPumpUnsafe) {
+  run_for(100);
+  soil.set_value(0, 25000);
+  ASSERT_TRUE(run_until([&] { return pump.current() == 1000; }, 10'100));
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "pump"), std::make_pair(1000, std::string("local")));
+  ASSERT_TRUE(run_until([&] { return pump.current() == 0; }, 5000));
+  // クールダウン：パルスの開始から10分は動かない
+  EXPECT_FALSE(run_until([&] { return pump.current() != 0; }, 590'000));
+  EXPECT_TRUE(events_with("INTERLOCK_ACTIVE").empty());
+
+  soil.set_fault(true);
+  ASSERT_TRUE(run_until([&] { return !events_with("SENSOR_FAULT").empty(); }, 10'100));
+  const auto faults = events_with("SENSOR_FAULT");
+  ASSERT_EQ(faults.size(), 1U);
+  EXPECT_EQ(json_value(faults[0].payload, "channel"), "soil");
+  EXPECT_EQ(json_value(faults[0].payload, "severity"), "critical");
+  send(make_cmd(ulid(21), "set_actuator", R"({"id":"pump","level":1000})", "auto", R"("lease_s":10)"));
+  run_for(10);
+  EXPECT_EQ(json_value(last_ack(), "status"), "rejected");
+  EXPECT_EQ(json_value(last_ack(), "reason"), "unsafe");
+  EXPECT_EQ(pump.current(), 0);
+  EXPECT_TRUE(events_with("INTERLOCK_ACTIVE").empty());  // 止まっていたポンプには出さない
+
+  soil.set_fault(false);
+  ASSERT_TRUE(run_until([&] { return !events_with("SENSOR_RECOVERED").empty(); }, 31'000));
+  EXPECT_EQ(json_value(events_with("SENSOR_RECOVERED")[0].payload, "channel"), "soil");
+}
+
+TEST_F(NodeTest, Scenario4_ManualThenUpperCommandThenLeaseExpiryThenTimeout) {
+  run_for(100);
+  node->press_button();
+  EXPECT_EQ(node->mode(), domain::Mode::Manual);
+  EXPECT_EQ(node->set_manual("fan_main", 500), ManualControl::Outcome::Accepted);
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "fan_main"), std::make_pair(500, std::string("local")));
+
+  send(make_cmd(ulid(22), "set_actuator", R"({"id":"fan_main","level":800})", "auto", R"("lease_s":3)"));
+  run_for(1000);
+  EXPECT_EQ(actuator_in(last_telemetry(), "fan_main"), std::make_pair(800, std::string("auto")));
+  run_for(3000);  // リースが切れると手動の値に戻る
+  EXPECT_EQ(actuator_in(last_telemetry(), "fan_main"), std::make_pair(500, std::string("local")));
+
+  // 最後の手動操作から30分で自動に戻る
+  ASSERT_TRUE(run_until([&] { return node->mode() == domain::Mode::Auto; }, 30 * 60 * 1000));
+  const auto mc = events_with("MODE_CHANGED");
+  ASSERT_EQ(mc.size(), 2U);
+  EXPECT_EQ(json_value(mc[0].payload, "cause"), "button");
+  EXPECT_EQ(json_value(mc[1].payload, "from"), "manual");
+  EXPECT_EQ(json_value(mc[1].payload, "to"), "auto");
+  EXPECT_EQ(json_value(mc[1].payload, "cause"), "timeout");
+  run_for(10);
+  EXPECT_EQ(fan.current(), 0);  // 手動の設定は消える
+  EXPECT_EQ(node->set_manual("fan_main", 500), ManualControl::Outcome::NotManualMode);
+}
+
+TEST_F(NodeTest, ButtonCyclesModesAndRepublishesStateEachTime) {
+  run_for(100);
+  const auto states = link.on("state").size();
+  node->press_button();
+  node->press_button();
+  node->press_button();
+  run_for(10);
+  EXPECT_EQ(node->mode(), domain::Mode::Auto);
+  EXPECT_EQ(link.on("state").size(), states + 3);
+  EXPECT_EQ(events_with("MODE_CHANGED").size(), 3U);
+}
+
+TEST_F(NodeTest, TempSensorFaultForcesFanOn) {
+  run_for(100);
+  bme.set_fault(true);
+  ASSERT_TRUE(run_until([&] { return fan.current() == 1000; }, 2100));
+  const auto active = events_with("INTERLOCK_ACTIVE");
+  ASSERT_EQ(active.size(), 1U);
+  EXPECT_EQ(json_value(active[0].payload, "rule"), "sensor_fault");
+  EXPECT_EQ(events_with("SENSOR_FAULT").size(), 3U);  // temp_air・humidity・pressure（#6）
+  bme.set_fault(false);
+  ASSERT_TRUE(run_until([&] { return fan.current() == 0; }, 31'000));
+  EXPECT_EQ(events_with("INTERLOCK_RELEASED").size(), 1U);
+  EXPECT_EQ(events_with("SENSOR_RECOVERED").size(), 3U);
 }
 
 }  // namespace

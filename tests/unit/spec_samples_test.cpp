@@ -21,10 +21,10 @@ namespace {
 namespace fs = std::filesystem;
 using test::json_value;
 
-constexpr domain::ActuatorSpec kFan{"fan_main", 0, 1000, {}, {}};
-constexpr domain::ActuatorSpec kLed{"led_grow", 0, 1000, {}, {}};
-constexpr domain::ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}, "soil"};
-constexpr domain::ActuatorSpec kBuzzer{"buzzer", 0, 1000, {}, {}};
+constexpr domain::ActuatorSpec kFan{"fan_main", 0, 1000, {}};
+constexpr domain::ActuatorSpec kLed{"led_grow", 0, 1000, {}};
+constexpr domain::ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}};
+constexpr domain::ActuatorSpec kBuzzer{"buzzer", 0, 1000, {}};
 
 std::vector<fs::path> samples(const char* dir) {
   std::vector<fs::path> out;
@@ -46,10 +46,11 @@ std::string read_file(const fs::path& p) {
 
 struct Device {
   drivers::SimActuator fan{kFan}, led{kLed}, pump{kPump}, buzzer{kBuzzer};
-  std::array<domain::IActuator*, 4> list{&fan, &led, &pump, &buzzer};
-  ControlArbiter arbiter{list};
+  std::array<domain::ActuatorBinding, 4> list{{{&fan, {}}, {&led, {}}, {&pump, {}}, {&buzzer, {}}}};
   domain::ReadingStore store{};
-  CommandService svc{arbiter, store};
+  ControlArbiter arbiter{list, store};
+  ModeManager modes{};
+  CommandService svc{arbiter, modes};
   // サンプルの ts（2026-11-20T06:00:12.345Z）の時点で受けたことにする
   std::int64_t now_utc{*infra::parse_ts("2026-11-20T06:00:12.345Z")};
 };
