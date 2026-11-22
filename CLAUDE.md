@@ -24,7 +24,7 @@ IoT・組込みポートフォリオ4作品のうちの1つで、上位（作品
 
 ## コードの決まり
 
-- 層と依存の向き：`app → domain`、`app → infra`（インターフェース）、`drivers → domain・hal`、`infra → support`、`hal → support`（`src/hal/` はハードのインターフェースだけ。II2cBus・IAdc・IPwm・IGpio・IMutex）、`platform → hal・infra・drivers`（実装を提供する）、すべて `→ support`。逆向きのリンクを作らない。CMake のターゲットを層ごとに分ける
+- 層と依存の向き：`app → domain`、`app → infra`（インターフェース）、`drivers → domain・hal`、`infra → support`、`hal → support`（`src/hal/` はハードのインターフェースだけ。II2cBus・IAdc・IPwm・IGpio・IMutex・ITimer（open-questions #54））、`platform → hal・infra・drivers`（実装を提供する）、すべて `→ support`。逆向きのリンクを作らない。CMake のターゲットを層ごとに分ける
 - `src/hal/` は自作 iot-hal の取り込み（open-questions #5）が決まったら置き換える前提で作る
 - ESP-IDF・Paho・POSIX・`<thread>`・`<mutex>` のヘッダを include できるのは `src/platform/` の下だけ。`src/drivers/`（`src/drivers/fake/` を除く）は `src/platform/` のヘッダを include しない
 - C++20。製品コードは `-fno-exceptions -fno-rtti`。警告は `-Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast -Wnon-virtual-dtor -Woverloaded-virtual -Wnull-dereference`。外部ライブラリには警告設定を当てない
