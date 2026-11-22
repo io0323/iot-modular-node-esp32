@@ -1,0 +1,3 @@
+[submodule "external/iot-common-spec"]
+	path = external/iot-common-spec
+	url = https://github.com/io0323/iot-common-spec.git
