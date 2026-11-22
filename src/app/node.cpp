@@ -5,14 +5,14 @@ namespace node::app {
 using infra::Kind;
 using infra::LinkEvent;
 
-Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link,
-           const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log)
+Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link, infra::INetwork& network,
+           const infra::ITimeSync& sync, const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log)
     : config_(config),
       registry_(registry),
       link_(link),
       clock_(clock),
       log_(log),
-      envelope_(config.device_id, clock, rng),
+      envelope_(config.device_id, clock, sync, rng),
       topics_(config.site, config.device_id),
       publisher_(link, envelope_, topics_, clock, log),
       arbiter_(registry.actuators(), store_),
@@ -22,7 +22,8 @@ Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMq
       commands_(arbiter_, modes_),
       state_(registry.sensors(), arbiter_, config.fw_version),
       telemetry_(arbiter_),
-      ui_(registry.ui(), modes_, manual_, arbiter_, store_) {
+      ui_(registry.ui(), modes_, manual_, arbiter_, store_),
+      connection_(network, sync, link) {
   apply_mode_state();
 }
 
@@ -37,7 +38,6 @@ support::Result<void> Node::start() {
   if (auto r = ui_.init(); !r) return r;
   const std::uint64_t now = clock_.monotonic_ms();
   poller_.start(now);
-  next_connect_ms_ = now;
   next_diag_ms_ = now + config_.diag_interval_ms;
 
   // BOOT は接続後に state（online）の次に送る
@@ -61,15 +61,14 @@ support::Result<void> Node::start() {
 
 void Node::tick() {
   const std::uint64_t now = clock_.monotonic_ms();
-  handle_link_events(now);
-  if (link_state_ == LinkState::Disconnected && now >= next_connect_ms_) try_connect(now);
+  handle_connection(now);
 
   // 計測を先に行う（起動直後の最初の調停の前に全センサーを読む。#36）
   poller_.tick(now, poll_);
   post_sensor_events(poll_);
 
   if (const auto change = modes_.tick(now)) on_mode_change(*change);
-  if (ui_.tick(now, link_state_ == LinkState::Connected).mode_pressed) press_button();
+  if (ui_.tick(now, connection_.mqtt_connected()).mode_pressed) press_button();
   handle_inbound(now);
   run_rules(now);
 
@@ -78,9 +77,14 @@ void Node::tick() {
   post_interlock_events(changes);
 
   telemetry_.publish(poll_.readings, publisher_);
-  if (link_state_ == LinkState::Connected) {
+  if (connection_.mqtt_connected()) {
     publisher_.flush_retries();
     events_.flush(publisher_);
+    // 最初の接続の前に捨てた件数は、BOOT の後の最初の機会に diag のログにだけ出す（#8）
+    if (!reported_pre_connect_drops_ && events_.boot_sent()) {
+      reported_pre_connect_drops_ = true;
+      if (events_.dropped_before_first_connect() > 0) log_diag();
+    }
   }
   if (now >= next_diag_ms_) {
     next_diag_ms_ = now + config_.diag_interval_ms;
@@ -89,7 +93,7 @@ void Node::tick() {
 }
 
 void Node::shutdown() {
-  if (link_state_ != LinkState::Connected) return;
+  if (!connection_.mqtt_connected()) return;
   const std::string_view offline = build_offline_state(work_buf_);
   if (!offline.empty()) (void)publisher_.publish_uncounted(Kind::State, offline);
   log_diag();
@@ -145,26 +149,19 @@ void Node::post_sensor_events(const SensorPoller::Result& r) {
   }
 }
 
-void Node::handle_link_events(std::uint64_t now) {
-  for (LinkEvent ev = link_.poll_event(); ev != LinkEvent::None; ev = link_.poll_event()) {
-    switch (ev) {
-      case LinkEvent::Connected:
-        link_state_ = LinkState::Connected;
-        publisher_.set_online(true);
-        log_fields("connect", "result", "ok");
-        on_connected();
-        break;
-      case LinkEvent::ConnectFailed:
-      case LinkEvent::Disconnected:
-        link_state_ = LinkState::Disconnected;
-        publisher_.set_online(false);
-        next_connect_ms_ = now + config_.reconnect_interval_ms;
-        publisher_.clear_retries();
-        log_fields("disconnect", "cause", ev == LinkEvent::ConnectFailed ? "connect_failed" : "connection_lost");
-        break;
-      case LinkEvent::None: break;
-    }
-  }
+void Node::handle_connection(std::uint64_t now) {
+  const ConnectionManager::Actions a = connection_.tick(now);
+  if (a.lost) on_lost(now);
+  if (a.connected) on_connected(now);
+  if (a.want_mqtt_connect) try_connect(now);
+  for (std::uint32_t token = 0; link_.poll_delivery(token);) events_.on_delivered(token);
+}
+
+void Node::on_lost(std::uint64_t now) {
+  publisher_.set_online(false);
+  publisher_.clear_retries();  // cmd_ack は送り直さない。state は再接続のたびに新しく送る（#71）
+  events_.on_disconnected(infra::Stamp{now});
+  log_fields("disconnect", "cause", connection_.network_up() ? "connection_lost" : "network_down");
 }
 
 std::string_view Node::build_offline_state(std::array<char, Publisher::kMessageMax>& buf) {
@@ -185,18 +182,18 @@ void Node::try_connect(std::uint64_t now) {
   opt.password = config_.password;
   opt.keepalive_s = config_.keepalive_s;
   opt.will = infra::Will{topics_.of(Kind::State), will, infra::Qos::AtLeastOnce, true};
-  if (link_.connect(opt)) {
-    link_state_ = LinkState::Connecting;
-    log_fields("connect", "result", "started");
-  } else {
-    next_connect_ms_ = now + config_.reconnect_interval_ms;
-    log_fields("connect", "result", "error");
-  }
+  connection_.connect_mqtt(opt, now);
+  log_fields("connect", "result", connection_.mqtt_state() == ConnectionManager::MqttState::Connecting ? "started"
+                                                                                                       : "error");
 }
 
-void Node::on_connected() {
+void Node::on_connected(std::uint64_t now) {
+  publisher_.set_online(true);
+  log_fields("connect", "result", "ok");
   if (!link_.subscribe(topics_.cmd(), infra::Qos::AtLeastOnce)) log_fields("connect", "result", "subscribe_error");
-  publish_state();  // state（online）→ BOOT の順（BOOT は tick の最後に events_ から送る）
+  // state（online）→（再接続なら UPSTREAM_LOST → 保持していたイベント → UPSTREAM_RESTORED）の順（#70）
+  publish_state();
+  events_.on_connected(infra::Stamp{now});
 }
 
 void Node::publish_state() {
@@ -216,7 +213,8 @@ void Node::handle_inbound(std::uint64_t now) {
     w.end_object();
     if (w.ok()) log_.write("rx", w.view());
 
-    const CommandOutcome outcome = commands_.handle(inbound_.payload.view(), now, clock_.utc_ms());
+    const CommandOutcome outcome =
+        commands_.handle(inbound_.payload.view(), now, envelope_.utc_of(infra::Stamp{now}));
     if (outcome.kind == CommandOutcome::Kind::Discarded) {
       ++discards_[static_cast<std::size_t>(outcome.discard)];
       log_fields("rx_discard", "reason", to_string(outcome.discard));
@@ -274,6 +272,11 @@ void Node::log_diag() {
   w.key("encode_errors").uinteger(c.encode_errors);
   w.key("events_pending").uinteger(events_.pending());
   w.key("events_dropped").uinteger(events_.dropped());
+  w.key("events_dropped_before_connect").uinteger(events_.dropped_before_first_connect());
+  w.key("events_inflight").uinteger(events_.inflight());
+  w.key("event_deferred").uinteger(c.event_deferred);
+  w.key("mqtt_attempts").uinteger(connection_.mqtt_attempts());
+  w.key("network_attempts").uinteger(connection_.network_attempts());
   w.key("rx_discard").begin_object();
   for (auto r : {infra::DiscardReason::NotJson, infra::DiscardReason::BadEnvelope, infra::DiscardReason::NoCmdId}) {
     w.key(to_string(r)).uinteger(discards_[static_cast<std::size_t>(r)]);

@@ -8,6 +8,7 @@
 #include "infra/clock.hpp"
 #include "infra/json_writer.hpp"
 #include "infra/random.hpp"
+#include "infra/time_sync.hpp"
 #include "support/fixed_string.hpp"
 
 namespace node::infra {
@@ -30,22 +31,23 @@ constexpr std::string_view schema_of(Kind k) {
   return "";
 }
 
-/// @brief 電文の時刻（ts と uptime_ms）。イベントは発生時の時刻を持つ。
+/// @brief 電文の時刻。発生時の単調時計（ms）だけを持ち、ts と uptime_ms は送るときに求める（P4 の決定 #65）。
 struct Stamp {
-  std::int64_t utc_ms{0};
-  std::uint32_t uptime_ms{0};
+  std::uint64_t monotonic_ms{0};
 };
 
 /// @brief 共通エンベロープ（共通仕様 第3章）を組み立てる。
 ///
-/// seq は kind ごとに 0 から数え、uint32 で一周する。電文を送れたときだけ commit_seq で進める。
+/// seq は kind ごとに 0 から数え、uint32 で一周する。電文を送れたときだけ commit_seq で進める（送るときに振る。#66）。
+/// ts は「発生時の単調時計 ＋ 同期で得た差（最新の値）」、uptime_ms は発生時の起動からの経過時間（#65）。
 class EnvelopeFactory {
  public:
   /// @brief 起動時に作る。boot_id はここで乱数から決める。
   /// @param device_id 発信元（mcu-cpp-01）
   /// @param clock 時計
+  /// @param sync 時刻同期
   /// @param rng 乱数
-  EnvelopeFactory(std::string_view device_id, const IClock& clock, IRandom& rng);
+  EnvelopeFactory(std::string_view device_id, const IClock& clock, const ITimeSync& sync, IRandom& rng);
 
   /// @brief boot_id（16進小文字8桁）。
   [[nodiscard]] std::string_view boot_id() const { return boot_id_.view(); }
@@ -57,7 +59,16 @@ class EnvelopeFactory {
   /// @brief seq を直接決める（一周のテスト用）。
   void set_seq_for_test(Kind k, std::uint32_t seq) { seq_[index_of(k)] = seq; }
   /// @brief いまの時刻。
-  [[nodiscard]] Stamp now() const;
+  [[nodiscard]] Stamp now() const { return Stamp{clock_.monotonic_ms()}; }
+  /// @brief 時刻の UTC（単調時計＋同期の差）。
+  [[nodiscard]] std::int64_t utc_of(const Stamp& stamp) const {
+    return static_cast<std::int64_t>(stamp.monotonic_ms) + sync_.utc_offset_ms();
+  }
+  /// @brief 時刻の uptime_ms（起動からの経過。uint32 で約49日で一周）。
+  [[nodiscard]] std::uint32_t uptime_of(const Stamp& stamp) const {
+    const std::uint64_t up = stamp.monotonic_ms >= boot_monotonic_ms_ ? stamp.monotonic_ms - boot_monotonic_ms_ : 0;
+    return static_cast<std::uint32_t>(up & 0xFFFFFFFFU);
+  }
 
   /// @brief エンベロープの先頭を書く。"{"schema":…,"payload":" まで書くので、
   /// 呼び出し側が payload の値を書いてから end_object() で閉じる。
@@ -70,6 +81,7 @@ class EnvelopeFactory {
  private:
   std::string_view device_id_;
   const IClock& clock_;
+  const ITimeSync& sync_;
   IRandom& rng_;
   std::uint64_t boot_monotonic_ms_;
   support::FixedString<8> boot_id_{};

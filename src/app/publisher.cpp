@@ -11,8 +11,8 @@ Publisher::Publisher(infra::IMqttLink& link, infra::EnvelopeFactory& envelope, c
                      const infra::IClock& clock, infra::ILogSink& log)
     : link_(link), envelope_(envelope), topics_(topics), clock_(clock), log_(log) {}
 
-Result<void> Publisher::send_now(Kind kind, std::string_view message) {
-  Result<void> r =
+Result<std::uint32_t> Publisher::send_now(Kind kind, std::string_view message) {
+  Result<std::uint32_t> r =
       link_.publish(topics_.of(kind), message, infra::Topics::qos_of(kind), infra::Topics::retain_of(kind));
   if (r) {
     ++counters_.sent;
@@ -21,7 +21,7 @@ Result<void> Publisher::send_now(Kind kind, std::string_view message) {
   return r;
 }
 
-Result<void> Publisher::enqueue_retry(Kind kind, std::string_view message) {
+Result<Publisher::Sent> Publisher::enqueue_retry(Kind kind, std::string_view message, std::uint32_t seq) {
   Pending p{};
   p.kind = kind;
   if (!p.message.assign(message) || !retries_.push_back(p)) {
@@ -30,39 +30,50 @@ Result<void> Publisher::enqueue_retry(Kind kind, std::string_view message) {
   }
   ++counters_.retry_queued;
   envelope_.commit_seq(kind);
-  return support::ok();
+  return Sent{0, seq};
 }
 
-Result<void> Publisher::send_built(Kind kind, std::string_view message) {
-  const std::uint64_t now = clock_.monotonic_ms();
-  // 再送待ちがあるうちは順序を守るため後ろに並べる
-  if (kind != Kind::Telemetry && !retries_.empty()) return enqueue_retry(kind, message);
+Result<Publisher::Sent> Publisher::send_built(Kind kind, std::string_view message, std::uint32_t seq, bool commit) {
+  const bool retryable = kind == Kind::CmdAck || kind == Kind::State;
+  // cmd_ack・state は、送り直し待ちがあるうちは順序を守るため後ろに並べる
+  if (retryable && commit && !retries_.empty()) return enqueue_retry(kind, message, seq);
 
-  if (!limiter_.try_take(kind, now)) {
-    if (kind == Kind::Telemetry) {
-      ++counters_.telemetry_rate_dropped;
-      return make_error(ErrorCode::Busy, "rate limited");
+  const auto deferred = [&]() -> Result<Sent> {
+    if (kind == Kind::Telemetry) return make_error(ErrorCode::Busy, "telemetry dropped");
+    if (kind == Kind::Event) {
+      ++counters_.event_deferred;
+      return make_error(ErrorCode::Busy, "event deferred");
     }
-    return enqueue_retry(kind, message);
+    if (!commit) return make_error(ErrorCode::Busy, "busy");
+    return enqueue_retry(kind, message, seq);
+  };
+
+  if (!limiter_.try_take(kind, clock_.monotonic_ms())) {
+    if (kind == Kind::Telemetry) ++counters_.telemetry_rate_dropped;
+    return deferred();
   }
-  Result<void> r = send_now(kind, message);
+  const Result<std::uint32_t> r = send_now(kind, message);
   if (r) {
-    envelope_.commit_seq(kind);
-    return r;
+    if (commit) envelope_.commit_seq(kind);
+    return Sent{r.value(), seq};
   }
   if (r.error().code == ErrorCode::Busy) {
-    if (kind == Kind::Telemetry) {
-      ++counters_.telemetry_busy_dropped;
-      return r;
-    }
-    return enqueue_retry(kind, message);
+    if (kind == Kind::Telemetry) ++counters_.telemetry_busy_dropped;
+    return deferred();
   }
-  return r;
+  return r.error();
+}
+
+Result<Publisher::Sent> Publisher::republish(Kind kind, std::string_view message, std::uint32_t seq) {
+  if (!online()) return make_error(ErrorCode::NotConnected, "not connected");
+  return send_built(kind, message, seq, false);
 }
 
 Result<void> Publisher::publish_uncounted(Kind kind, std::string_view message) {
   if (!online()) return make_error(ErrorCode::NotConnected, "not connected");
-  return send_now(kind, message);
+  const Result<std::uint32_t> r = send_now(kind, message);
+  if (!r) return r.error();
+  return support::ok();
 }
 
 void Publisher::flush_retries() {

@@ -24,40 +24,81 @@ constexpr std::string_view to_string(Severity s) {
   return "";
 }
 
-/// @brief event の送信。遷移1回につき1件を固定容量（32件）にため、接続中に古い順に送る（基本設計書 第6章、FR-11）。
+/// @brief event の保持と送信（基本設計書 FR-11、P4 の決定 #8・#65・#70・#71、open-questions #74）。
 ///
-/// あふれたら新しいイベントを捨てて数える（open-questions #8、仮版。P4 で本版）。
+/// - イベントは発生時の単調時計で記録し、送るときに ts と seq を付ける
+/// - 送れない間（未接続・同期前・上限）は最大32件保持する。あふれたら BOOT を除く中で最も古いものを捨てて数える
+/// - QoS 1 で送って PUBACK を受ける前に切れた電文は、同じ msg_id・seq・ts のまま保持の先頭に戻し、再接続後に送り直す
+/// - 一度接続した後に切れたら、再接続のときに UPSTREAM_LOST（切れた時刻）を先頭に、UPSTREAM_RESTORED（down_ms・dropped）を
+///   保持の後ろに入れる。この2件は32件に数えない
 class EventService {
  public:
   static constexpr std::size_t kCapacity = 32;
   static constexpr std::size_t kDetailMax = 192;
+  static constexpr std::size_t kMessageMax = 768;
 
-  /// @brief イベントをためる。
+  /// @brief イベントをためる。あふれたら BOOT を除く中で最も古いものを捨てる。
   /// @param code コード（例："BOOT"）
   /// @param severity 重大度
   /// @param detail_json detail のオブジェクト（"{...}"）。空なら detail を付けない
   /// @param stamp 発生時刻
   /// @param channel event の channel（空なら付けない）
-  /// @return あふれて捨てたら false
+  /// @return 入れられなかったら false（文字列が長すぎる）
   bool post(std::string_view code, Severity severity, std::string_view detail_json, const infra::Stamp& stamp,
             std::string_view channel = {});
 
-  /// @brief ためたイベントを送れるだけ送る（未接続なら何もしない）。
+  /// @brief ためたイベントを送れるだけ送る。
   void flush(Publisher& publisher);
+  /// @brief PUBACK を受けた（確認が取れた）。
+  void on_delivered(std::uint32_t token);
+  /// @brief 接続した（LOST・RESTORED を入れる）。
+  /// @param stamp 接続した時刻
+  void on_connected(const infra::Stamp& stamp);
+  /// @brief 切れた。確認待ちの電文を保持の先頭に戻し、一度接続した後なら切れた時刻を覚える。
+  /// @param stamp 切れた時刻
+  void on_disconnected(const infra::Stamp& stamp);
 
   [[nodiscard]] std::size_t pending() const { return queue_.size(); }
-  [[nodiscard]] std::uint32_t dropped() const { return dropped_; }
+  [[nodiscard]] std::size_t inflight() const { return inflight_.size(); }
+  /// @brief 捨てた件数の合計。
+  [[nodiscard]] std::uint32_t dropped() const { return dropped_total_; }
+  /// @brief 最初の接続の前に捨てた件数。
+  [[nodiscard]] std::uint32_t dropped_before_first_connect() const { return dropped_before_connect_; }
+  /// @brief BOOT を送ったか。
+  [[nodiscard]] bool boot_sent() const { return boot_sent_; }
 
  private:
+  enum class Role : std::uint8_t { Normal, Boot, Lost, Restored };
   struct Pending {
     support::FixedString<32> code{};
     Severity severity{Severity::Info};
     support::FixedString<kDetailMax> detail{};
     support::FixedString<32> channel{};
     infra::Stamp stamp{};
+    Role role{Role::Normal};
+    bool built{false};  ///< 組み立て済み（送り直し。message と seq を変えない）
+    support::FixedString<kMessageMax> message{};
+    std::uint32_t seq{0};
   };
-  support::StaticVector<Pending, kCapacity> queue_{};
-  std::uint32_t dropped_{0};
+  struct Inflight {
+    std::uint32_t token{0};
+    Pending item{};
+  };
+
+  [[nodiscard]] std::size_t normal_count() const;
+  void drop_oldest();
+  bool insert_front(const Pending& p);
+  support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
+
+  support::StaticVector<Pending, kCapacity + 2> queue_{};
+  support::StaticVector<Inflight, kCapacity> inflight_{};
+  bool ever_connected_{false};
+  bool lost_{false};
+  infra::Stamp lost_at_{};
+  bool boot_sent_{false};
+  std::uint32_t dropped_total_{0};
+  std::uint32_t dropped_since_restored_{0};
+  std::uint32_t dropped_before_connect_{0};
 };
 
 }  // namespace node::app

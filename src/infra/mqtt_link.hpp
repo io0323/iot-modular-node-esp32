@@ -43,7 +43,8 @@ struct InboundMessage {
 /// @brief MQTT の接続（自作 MQTT アダプタの取り込み元が決まるまでの仮の抽象。open-questions #5）。
 ///
 /// QoS 1 の確認待ち（PUBACK 待ち）の件数を実装が数え、kMaxInflight に達したら publish は Busy を返す
-/// （共通仕様 第4章「送信量の上限」）。
+/// （共通仕様 第4章「送信量の上限」）。QoS 1 の publish はトークンを返し、PUBACK を受けたトークンを poll_delivery で返す。
+/// 切断したら確認待ちは捨てる（clean session）。切断の時点で PUBACK を受けていないトークンは「確認が取れなかった」もの。
 class IMqttLink {
  public:
   static constexpr std::size_t kMaxInflight = 32;
@@ -55,9 +56,9 @@ class IMqttLink {
   /// @param timeout_ms 切断を待つ上限
   virtual void disconnect(std::uint32_t timeout_ms) = 0;
   /// @brief 発行する。
-  /// @return 確認待ちが上限なら Busy、未接続なら NotConnected
-  virtual support::Result<void> publish(std::string_view topic, std::string_view payload, Qos qos,
-                                        bool retain) = 0;
+  /// @return QoS 1 はトークン（1 以上）、QoS 0 は 0。確認待ちが上限なら Busy、未接続なら NotConnected
+  virtual support::Result<std::uint32_t> publish(std::string_view topic, std::string_view payload, Qos qos,
+                                                 bool retain) = 0;
   /// @brief 購読する。
   virtual support::Result<void> subscribe(std::string_view topic, Qos qos) = 0;
   /// @brief 受信した電文を1件取り出す。
@@ -66,6 +67,9 @@ class IMqttLink {
   virtual bool poll_message(InboundMessage& out) = 0;
   /// @brief 接続状態の変化を1件取り出す。なければ LinkEvent::None。
   virtual LinkEvent poll_event() = 0;
+  /// @brief PUBACK を受けた QoS 1 の電文のトークンを1件取り出す。
+  /// @return 取り出せたら true
+  virtual bool poll_delivery(std::uint32_t& token) = 0;
   /// @brief 接続中か。
   [[nodiscard]] virtual bool connected() const = 0;
   /// @brief QoS 1 の確認待ちの件数。

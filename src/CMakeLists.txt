@@ -42,6 +42,7 @@ add_library(node_app STATIC
   app/rule_engine.cpp
   app/sensor_poller.cpp
   app/ui_service.cpp
+  app/connection_manager.cpp
   app/node.cpp)
 target_link_libraries(node_app PUBLIC node_domain node_infra)
 node_product_target(node_app)

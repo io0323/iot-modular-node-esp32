@@ -86,14 +86,14 @@ void PahoMqttLink::disconnect(std::uint32_t timeout_ms) {
   opts.timeout = static_cast<int>(timeout_ms);
   (void)MQTTAsync_disconnect(handle_of(client_), &opts);
   connected_.store(false);
+  forget_inflight();
 }
 
-Result<void> PahoMqttLink::publish(std::string_view topic, std::string_view payload, infra::Qos qos, bool retain) {
+Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_view payload, infra::Qos qos,
+                                            bool retain) {
   if (client_ == nullptr || !connected_.load()) return make_error(ErrorCode::NotConnected, "not connected");
   const bool qos1 = qos == infra::Qos::AtLeastOnce;
-  if (qos1 && inflight_.load() >= static_cast<int>(kMaxInflight)) {
-    return make_error(ErrorCode::Busy, "inflight limit");
-  }
+  if (qos1 && inflight() >= kMaxInflight) return make_error(ErrorCode::Busy, "inflight limit");
   const std::string topic_s(topic);
 
   NODE_PAHO_INIT_BEGIN
@@ -105,18 +105,26 @@ Result<void> PahoMqttLink::publish(std::string_view topic, std::string_view payl
   msg.qos = static_cast<int>(qos);
   msg.retained = retain ? 1 : 0;
   if (qos1) {
-    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_done(ctx, r); };
-    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_done(ctx, r); };
+    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_success(ctx, r != nullptr ? r->token : 0); };
+    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_failure(ctx, r != nullptr ? r->token : 0); };
     ropts.context = this;
-    inflight_.fetch_add(1);
   }
+  // Paho を呼ぶ間は mu_ を持たない（Paho のスレッドのコールバックも mu_ を取るので、持ったまま呼ぶとデッドロックしうる）
   const int rc = MQTTAsync_sendMessage(handle_of(client_), topic_s.c_str(), &msg, &ropts);
   if (rc != MQTTASYNC_SUCCESS) {
-    if (qos1) inflight_.fetch_sub(1);
     return make_error(rc == MQTTASYNC_DISCONNECTED ? ErrorCode::NotConnected : ErrorCode::IoError,
                       "MQTTAsync_sendMessage failed");
   }
-  return support::ok();
+  if (!qos1) return std::uint32_t{0};
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (early_acked_.erase(ropts.token) > 0) {
+      delivered_.push_back(static_cast<std::uint32_t>(ropts.token));  // 表に入れる前に PUBACK が届いていた
+    } else {
+      inflight_tokens_.insert(ropts.token);
+    }
+  }
+  return static_cast<std::uint32_t>(ropts.token);
 }
 
 Result<void> PahoMqttLink::subscribe(std::string_view topic, infra::Qos qos) {
@@ -138,6 +146,25 @@ bool PahoMqttLink::poll_message(infra::InboundMessage& out) {
   inbound_head_ = (inbound_head_ + 1) % kInboundCapacity;
   --inbound_count_;
   return true;
+}
+
+bool PahoMqttLink::poll_delivery(std::uint32_t& token) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (delivered_.empty()) return false;
+  token = delivered_.front();
+  delivered_.pop_front();
+  return true;
+}
+
+std::size_t PahoMqttLink::inflight() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return inflight_tokens_.size();
+}
+
+void PahoMqttLink::forget_inflight() {
+  std::lock_guard<std::mutex> lock(mu_);
+  inflight_tokens_.clear();  // 切断の時点で確認が取れていないもの（呼び出し側が送り直しを決める）
+  early_acked_.clear();
 }
 
 infra::LinkEvent PahoMqttLink::poll_event() {
@@ -199,13 +226,13 @@ int PahoMqttLink::on_message(void* context, char* topic, int topic_len, void* me
 void PahoMqttLink::on_connection_lost(void* context, char* /*cause*/) {
   auto* self = static_cast<PahoMqttLink*>(context);
   self->connected_.store(false);
-  self->inflight_.store(0);
+  self->forget_inflight();
   self->push_event(infra::LinkEvent::Disconnected);
 }
 
 void PahoMqttLink::on_connect_success(void* context, void* /*response*/) {
   auto* self = static_cast<PahoMqttLink*>(context);
-  self->inflight_.store(0);
+  self->forget_inflight();
   self->connected_.store(true);
   self->push_event(infra::LinkEvent::Connected);
 }
@@ -216,9 +243,24 @@ void PahoMqttLink::on_connect_failure(void* context, void* /*response*/) {
   self->push_event(infra::LinkEvent::ConnectFailed);
 }
 
-void PahoMqttLink::on_publish_qos1_done(void* context, void* /*response*/) {
+void PahoMqttLink::on_publish_qos1_success(void* context, int token) {
   auto* self = static_cast<PahoMqttLink*>(context);
-  if (self->inflight_.fetch_sub(1) <= 0) self->inflight_.store(0);
+  {
+    std::lock_guard<std::mutex> lock(self->mu_);
+    // 表にあるものを「確認が取れた」として知らせる。まだ表にない（publish の戻りより先に届いた）ものは覚えておく
+    if (self->inflight_tokens_.erase(token) == 0) {
+      if (self->connected_.load()) self->early_acked_.insert(token);
+      return;
+    }
+    self->delivered_.push_back(static_cast<std::uint32_t>(token));
+  }
+  self->cv_.notify_one();
+}
+
+void PahoMqttLink::on_publish_qos1_failure(void* context, int token) {
+  auto* self = static_cast<PahoMqttLink*>(context);
+  std::lock_guard<std::mutex> lock(self->mu_);
+  (void)self->inflight_tokens_.erase(token);  // 確認は取れていない（送り直しは切断のときに決める）
 }
 
 }  // namespace node::platform
