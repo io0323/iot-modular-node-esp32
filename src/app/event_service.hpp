@@ -37,8 +37,10 @@ class EventService {
   /// @param severity 重大度
   /// @param detail_json detail のオブジェクト（"{...}"）。空なら detail を付けない
   /// @param stamp 発生時刻
+  /// @param channel event の channel（空なら付けない）
   /// @return あふれて捨てたら false
-  bool post(std::string_view code, Severity severity, std::string_view detail_json, const infra::Stamp& stamp);
+  bool post(std::string_view code, Severity severity, std::string_view detail_json, const infra::Stamp& stamp,
+            std::string_view channel = {});
 
   /// @brief ためたイベントを送れるだけ送る（未接続なら何もしない）。
   void flush(Publisher& publisher);
@@ -51,6 +53,7 @@ class EventService {
     support::FixedString<32> code{};
     Severity severity{Severity::Info};
     support::FixedString<kDetailMax> detail{};
+    support::FixedString<32> channel{};
     infra::Stamp stamp{};
   };
   support::StaticVector<Pending, kCapacity> queue_{};

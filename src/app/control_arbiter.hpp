@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -7,8 +8,9 @@
 #include <string_view>
 
 #include "domain/device.hpp"
+#include "domain/interlock.hpp"
 #include "domain/lease.hpp"
-#include "domain/pump_interlock.hpp"
+#include "domain/reading_store.hpp"
 #include "domain/types.hpp"
 #include "support/static_vector.hpp"
 
@@ -16,18 +18,22 @@ namespace node::app {
 
 /// @brief アクチュエーターへの出力を決める唯一の場所（基本設計書 第6章「制御の調停」）。
 ///
-/// 仮版（P2 で5段にする）：アクチュエーターごとに「インターロック ＞ 上位指令（リース中）＞ 既定値（0）」で
-/// 出力と owner を決める。同じ対象への新しい set_actuator は priority によらず古い指令を置き換える。
+/// アクチュエーターごとに「インターロック ＞ 上位指令（リース中）＞ 本体の手動操作（手動モードのときだけ）
+/// ＞ ローカルルール（自動・省電力モードのときだけ）＞ 既定値（0）」で出力を決める。
+/// インターロックの強制値・上限はどの段の結果にもかける。インターロックで値を変えたら owner は interlock。
+/// 具体的なインターロックのクラスや機器 ID は知らない（IInterlock と構成表だけで扱う）。
 class ControlArbiter {
  public:
   static constexpr std::size_t kMaxActuators = 8;
+  static constexpr std::size_t kMaxInterlocksPerActuator = 4;
 
-  /// @brief インターロックの遷移（イベントの元）。
+  /// @brief インターロックの遷移（INTERLOCK_ACTIVE／RELEASED の元）。
   struct InterlockChange {
-    std::string_view id;
-    domain::PumpInterlock::Transition transition{domain::PumpInterlock::Transition::None};
+    std::string_view id;    ///< アクチュエーター
+    std::string_view rule;  ///< インターロックの rule
+    bool active{false};     ///< true：効いて出力を変えた、false：解けた
   };
-  using InterlockChanges = support::StaticVector<InterlockChange, kMaxActuators>;
+  using InterlockChanges = support::StaticVector<InterlockChange, kMaxActuators * kMaxInterlocksPerActuator>;
 
   /// @brief set_command の結果（ack の applied・limited）。
   struct CommandResult {
@@ -36,27 +42,33 @@ class ControlArbiter {
   };
 
   /// @brief 調停の対象を登録する。全アクチュエーターを0にして始める（起動直後は停止）。
-  /// @param actuators アクチュエーター（kMaxActuators 台まで）
-  explicit ControlArbiter(std::span<domain::IActuator* const> actuators);
+  /// @param actuators アクチュエーターとインターロックの組（kMaxActuators 台まで）
+  /// @param store 最新の計測値（インターロックの入力）
+  ControlArbiter(std::span<const domain::ActuatorBinding> actuators, const domain::ReadingStore& store);
 
   /// @brief ID からアクチュエーターの番号を探す。
   [[nodiscard]] std::optional<std::size_t> find(std::string_view id) const;
 
   /// @brief 上位指令を登録し、すぐに出力を決める。
-  /// @param index アクチュエーターの番号
-  /// @param level 要求（min〜max に収める）
-  /// @param priority cmd の priority（owner になる）
-  /// @param lease_s リースの秒数
-  /// @param now_ms 受信時刻（単調時計の ms）
-  /// @param changes インターロックの遷移の書き込み先
-  /// @return 出力した値と、安全制限で丸めたか
+  /// @return 出力した値と、安全制限で丸めたか（範囲外・インターロック・lease_s が max_on_s を超える）
   CommandResult set_command(std::size_t index, domain::Level level, domain::Priority priority,
                             std::uint32_t lease_s, std::uint64_t now_ms, InterlockChanges& changes);
-
   /// @brief 上位指令を解除し、すぐに出力を決める。
   void release(std::size_t index, std::uint64_t now_ms, InterlockChanges& changes);
 
-  /// @brief リースの期限とインターロックを見て、全アクチュエーターの出力を決め直す。
+  /// @brief 本体の手動操作の値を決める（std::nullopt で消す）。手動の段が有効なときだけ効く。
+  void set_manual(std::size_t index, std::optional<domain::Level> level);
+  /// @brief 本体の手動操作の値をすべて消す。
+  void clear_manual();
+  /// @brief ローカルルールの提案を決める（std::nullopt で提案なし）。ルールの段が有効なときだけ効く。
+  void set_rule_proposal(std::size_t index, std::optional<domain::Level> level);
+  /// @brief どの段を有効にするか（モードで決まる）。
+  void set_stages(bool manual_enabled, bool rules_enabled);
+
+  /// @brief このアクチュエーターへの set_actuator を rejected（unsafe）にするか（禁止中のインターロックがある）。
+  [[nodiscard]] bool rejects_commands(std::size_t index, std::uint64_t now_ms) const;
+
+  /// @brief リースの期限・インターロック・各段を見て、全アクチュエーターの出力を決め直す。
   void tick(std::uint64_t now_ms, InterlockChanges& changes);
 
   [[nodiscard]] std::size_t size() const { return slots_.size(); }
@@ -69,18 +81,32 @@ class ControlArbiter {
  private:
   struct Slot {
     domain::IActuator* actuator{nullptr};
-    std::optional<domain::PumpInterlock> interlock{};
+    std::span<domain::IInterlock* const> interlocks{};
+    std::array<bool, kMaxInterlocksPerActuator> announced{};  ///< ACTIVE を出して、まだ RELEASED を出していない
     bool has_lease{false};
     domain::Level lease_level{0};
     domain::Priority priority{domain::Priority::Auto};
     domain::Lease lease{};
+    std::optional<domain::Level> manual{};
+    std::optional<domain::Level> rule{};
     domain::Level output{0};
     domain::Owner owner{domain::Owner::None};
   };
 
+  /// 段の結果（インターロックをかける前）
+  struct StageResult {
+    domain::Level level{0};
+    domain::Owner owner{domain::Owner::None};
+  };
+
+  [[nodiscard]] StageResult stages(const Slot& s) const;
+  domain::Level apply_interlocks(Slot& s, domain::Level pre, std::uint64_t now_ms, InterlockChanges& changes);
   void evaluate(Slot& s, std::uint64_t now_ms, InterlockChanges& changes);
 
+  const domain::ReadingStore& store_;
   support::StaticVector<Slot, kMaxActuators> slots_{};
+  bool manual_enabled_{false};
+  bool rules_enabled_{true};
   std::uint32_t apply_errors_{0};
 };
 

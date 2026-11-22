@@ -3,11 +3,11 @@
 namespace node::app {
 
 bool EventService::post(std::string_view code, Severity severity, std::string_view detail_json,
-                        const infra::Stamp& stamp) {
+                        const infra::Stamp& stamp, std::string_view channel) {
   Pending p{};
   p.severity = severity;
   p.stamp = stamp;
-  if (!p.code.assign(code) || !p.detail.assign(detail_json) || !queue_.push_back(p)) {
+  if (!p.code.assign(code) || !p.detail.assign(detail_json) || !p.channel.assign(channel) || !queue_.push_back(p)) {
     ++dropped_;
     return false;
   }
@@ -23,6 +23,7 @@ void EventService::flush(Publisher& publisher) {
           w.begin_object();
           w.key("code").string(p.code.view());
           w.key("severity").string(to_string(p.severity));
+          if (!p.channel.empty()) w.key("channel").string(p.channel.view());
           if (!p.detail.empty()) w.key("detail").raw(p.detail.view());
           w.end_object();
         },

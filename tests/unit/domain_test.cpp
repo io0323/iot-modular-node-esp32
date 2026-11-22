@@ -136,12 +136,49 @@ TEST(PumpInterlock, ZeroResetsTheContinuousTimer) {
 TEST(ReadingStore, KeepsLatestPerChannel) {
   ReadingStore s;
   EXPECT_FALSE(s.latest("soil").has_value());
-  ASSERT_TRUE(s.update({"soil", 40000, Unit::Pct, Quality::Good}));
-  ASSERT_TRUE(s.update({"soil", 39000, Unit::Pct, Quality::Fault}));
+  ASSERT_TRUE(s.update({"soil", 40000, Unit::Pct, Quality::Good}, 0));
+  ASSERT_TRUE(s.update({"soil", 39000, Unit::Pct, Quality::Fault}, 10));
   const auto r = s.latest("soil");
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->value_milli, 39000);
   EXPECT_EQ(r->quality, Quality::Fault);
+  EXPECT_EQ(s.quality("soil", 10), Quality::Fault);
+}
+
+TEST(ReadingStore, StaleAfterThreeTimesThePeriod) {
+  ReadingStore s;
+  ASSERT_TRUE(s.set_period("lux", 1000));
+  ASSERT_TRUE(s.update({"lux", 300000, Unit::Lux, Quality::Good}, 5000));
+  EXPECT_EQ(s.quality("lux", 5000), Quality::Good);
+  EXPECT_EQ(s.quality("lux", 8000), Quality::Good);   // ちょうど3倍はまだ good
+  EXPECT_EQ(s.quality("lux", 8001), Quality::Stale);  // 3倍を超えたら stale
+  EXPECT_EQ(s.good_value("lux", 8000), 300000);
+  EXPECT_FALSE(s.good_value("lux", 8001).has_value());
+  // 省電力モードの周期（5倍）では、しきい値も5倍（#39）
+  ASSERT_TRUE(s.set_period("lux", 5000));
+  EXPECT_EQ(s.quality("lux", 20000), Quality::Good);
+  EXPECT_EQ(s.quality("lux", 20001), Quality::Stale);
+}
+
+TEST(ReadingStore, NeverReadIsStale) {
+  ReadingStore s;
+  ASSERT_TRUE(s.set_period("soil", 10000));
+  EXPECT_EQ(s.quality("soil", 0), Quality::Stale);  // 一度も good で読めていない（#36）
+  EXPECT_EQ(s.quality("unknown", 0), Quality::Stale);
+}
+
+TEST(ReadingStore, FaultThenGoodRecovers) {
+  ReadingStore s;
+  ASSERT_TRUE(s.set_period("temp_air", 2000));
+  ASSERT_TRUE(s.update({"temp_air", 25000, Unit::DegC, Quality::Good}, 0));
+  ASSERT_TRUE(s.mark_fault("temp_air", 2000));
+  EXPECT_EQ(s.quality("temp_air", 2000), Quality::Fault);
+  EXPECT_EQ(s.latest("temp_air")->value_milli, 25000);  // 値はそのまま
+  ASSERT_TRUE(s.update({"temp_air", 26000, Unit::DegC, Quality::Good}, 4000));
+  EXPECT_EQ(s.quality("temp_air", 4000), Quality::Good);
+  // センサーが stale を返したら stale
+  ASSERT_TRUE(s.update({"temp_air", 26000, Unit::DegC, Quality::Stale}, 4010));
+  EXPECT_EQ(s.quality("temp_air", 4010), Quality::Stale);
 }
 
 TEST(Types, StringsMatchCommonSpec) {

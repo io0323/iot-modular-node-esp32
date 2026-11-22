@@ -2,37 +2,8 @@
 
 namespace node::app {
 
-TelemetryService::TelemetryService(std::span<domain::ISensor* const> sensors, const ControlArbiter& arbiter,
-                                   domain::ReadingStore& store)
-    : sensors_(sensors.first(sensors.size() < kMaxSensors ? sensors.size() : kMaxSensors)),
-      arbiter_(arbiter), store_(store) {}
-
-void TelemetryService::start(std::uint64_t now_ms) {
-  for (std::size_t i = 0; i < sensors_.size(); ++i) next_due_ms_[i] = now_ms;
-}
-
-void TelemetryService::tick(std::uint64_t now_ms, Publisher& publisher) {
-  support::StaticVector<domain::Reading, kMaxReadings> readings{};
-  for (std::size_t i = 0; i < sensors_.size(); ++i) {
-    if (now_ms < next_due_ms_[i]) continue;
-    domain::ISensor& s = *sensors_[i];
-    const auto period = static_cast<std::uint64_t>(s.period().count());
-    // 遅れが周期を超えたら、取り戻さずに次の周期から数え直す
-    next_due_ms_[i] = (now_ms - next_due_ms_[i] >= period) ? now_ms + period : next_due_ms_[i] + period;
-
-    std::array<domain::Reading, kMaxReadings> buf{};
-    const auto r = s.read(buf);
-    if (!r) {
-      ++read_errors_;
-      continue;
-    }
-    for (std::size_t k = 0; k < r.value() && k < buf.size(); ++k) {
-      (void)store_.update(buf[k]);
-      (void)readings.push_back(buf[k]);
-    }
-  }
+void TelemetryService::publish(std::span<const domain::Reading> readings, Publisher& publisher) const {
   if (readings.empty()) return;
-
   (void)publisher.publish(infra::Kind::Telemetry, [&](infra::JsonWriter& w) {
     w.begin_object();
     w.key("readings").begin_array();

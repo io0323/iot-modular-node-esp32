@@ -82,7 +82,7 @@ CommandService::Exec CommandService::execute(const infra::CmdRequest& req, std::
   switch (req.op) {
     case OpKind::SetActuator: return set_actuator(req, now_ms, out);
     case OpKind::Release: return release(req, now_ms, out);
-    case OpKind::SetMode: return set_mode(req, out);
+    case OpKind::SetMode: return set_mode(req, now_ms, out);
     case OpKind::GetStatus:
       out.republish_state = true;
       return e;
@@ -111,14 +111,10 @@ CommandService::Exec CommandService::set_actuator(const infra::CmdRequest& req, 
     e.reject = RejectReason::UnknownTarget;
     return e;
   }
-  // 禁止中（土壌水分センサーの故障中のポンプなど）は rejected（unsafe）。リースも登録しない
-  const std::string_view inhibit = arbiter_.spec(*index).inhibit_on_fault_channel;
-  if (!inhibit.empty()) {
-    const auto latest = store_.latest(inhibit);
-    if (latest && latest->quality == domain::Quality::Fault) {
-      e.reject = RejectReason::Unsafe;
-      return e;
-    }
+  // 禁止中（土壌水分センサーが fault・stale の間のポンプなど）は rejected（unsafe）。リースも登録しない
+  if (arbiter_.rejects_commands(*index, now_ms)) {
+    e.reject = RejectReason::Unsafe;
+    return e;
   }
   e.output = true;
   e.result = arbiter_.set_command(*index, static_cast<domain::Level>(req.level), req.priority, *lease_s, now_ms,
@@ -142,19 +138,16 @@ CommandService::Exec CommandService::release(const infra::CmdRequest& req, std::
   return e;
 }
 
-CommandService::Exec CommandService::set_mode(const infra::CmdRequest& req, CommandOutcome& out) {
+CommandService::Exec CommandService::set_mode(const infra::CmdRequest& req, std::uint64_t now_ms,
+                                              CommandOutcome& out) {
   Exec e{};
   const auto mode = req.mode_state == FieldState::Ok ? domain::parse_mode(req.mode.view()) : std::nullopt;
   if (!mode) {
     e.reject = RejectReason::InvalidArg;
     return e;
   }
-  // 同じモードへの set_mode は done だけ返し、MODE_CHANGED も state の出し直しもしない（open-questions #18）
-  if (*mode != mode_) {
-    mode_ = *mode;
-    out.mode_changed_to = *mode;
-    out.republish_state = true;
-  }
+  // 同じモードへの set_mode は done だけ返し、MODE_CHANGED も state の出し直しもしない（#18）
+  out.mode_change = modes_.request(*mode, now_ms);
   return e;
 }
 

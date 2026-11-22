@@ -2,7 +2,8 @@
 
 namespace node::app {
 
-void StateService::write_payload(infra::JsonWriter& w, bool online, domain::Mode mode) const {
+void StateService::write_payload(infra::JsonWriter& w, bool online, domain::Mode mode,
+                                 std::uint32_t period_factor) const {
   w.begin_object();
   w.key("status").string(online ? "online" : "offline");
   w.key("mode").string(domain::to_string(mode));
@@ -12,7 +13,7 @@ void StateService::write_payload(infra::JsonWriter& w, bool online, domain::Mode
       w.begin_object();
       w.key("channel").string(ch.channel);
       w.key("unit").string(domain::to_string(ch.unit));
-      w.key("period_ms").uinteger(ch.period_ms);
+      w.key("period_ms").uinteger(static_cast<std::uint64_t>(ch.period_ms) * period_factor);
       w.end_object();
     }
   }

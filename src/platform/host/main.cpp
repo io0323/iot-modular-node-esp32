@@ -1,4 +1,7 @@
-// ホスト版の main：mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>]
+// ホスト版の main：mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>] [デバッグ入力…]
+//
+// デバッグ入力（P2。省略時は P1 と同じ動き）：--sim <channel>=<value>[@<秒>]、--sim-fault <センサーID>@<開始秒>[-<終了秒>]、
+// --press-at <秒>、--manual <id>=<level>@<秒>（debug_inputs.hpp）
 //
 // ブローカーは --broker、なければ IOTSPEC_MQTT_URL（既定 mqtt://localhost:1883）。
 // パスワードは IOTSPEC_MQTT_PASSWORD（既定 iotspec-dev）。BOOT の reset_reason は MCU_CPP_01_RESET_REASON（既定 power_on）。
@@ -13,6 +16,7 @@
 
 #include "app/node.hpp"
 #include "config/devices.hpp"
+#include "platform/host/debug_inputs.hpp"
 #include "platform/host/host_clock.hpp"
 #include "platform/host/host_random.hpp"
 #include "platform/host/jsonl_log_sink.hpp"
@@ -30,6 +34,7 @@ struct Args {
   std::string broker_uri;
   std::string site{"home"};
   std::string log_path;
+  node::platform::DebugInputs debug;
   bool ok{true};
 };
 
@@ -61,8 +66,17 @@ Args parse_args(int argc, char** argv) {
       a.site = argv[++i];
     } else if (arg == "--log" && has_value) {
       a.log_path = argv[++i];
+    } else if (std::string error; has_value && a.debug.parse(arg, argv[i + 1], error)) {
+      ++i;
+      if (!error.empty()) {
+        std::fprintf(stderr, "%s\n", error.c_str());
+        a.ok = false;
+      }
     } else {
-      std::fprintf(stderr, "usage: mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>]\n");
+      std::fprintf(stderr,
+                   "usage: mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>]\n"
+                   "  [--sim <channel>=<value>[@<sec>]] [--sim-fault <sensor>@<start>[-<end>]]\n"
+                   "  [--press-at <sec>] [--manual <id>=<level>@<sec>]\n");
       a.ok = false;
     }
   }
@@ -72,7 +86,7 @@ Args parse_args(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const Args args = parse_args(argc, argv);
+  Args args = parse_args(argc, argv);
   if (!args.ok) return 2;
 
   std::signal(SIGTERM, on_signal);
@@ -113,8 +127,11 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto next_tick = std::chrono::steady_clock::now();
+  const auto started = std::chrono::steady_clock::now();
+  auto next_tick = started;
   while (g_stop == 0) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+    args.debug.apply_due(static_cast<std::uint64_t>(elapsed.count()), app, *log);
     app.tick();
     next_tick += 10ms;
     const auto now = std::chrono::steady_clock::now();
