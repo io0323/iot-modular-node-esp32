@@ -25,15 +25,22 @@ class SimSensor final : public domain::ISensor {
             std::span<const std::int32_t> values_milli, std::chrono::milliseconds period);
 
   [[nodiscard]] std::string_view id() const override { return id_; }
-  support::Result<void> init() override { return support::ok(); }
+  support::Result<void> init() override;
   support::Result<std::size_t> read(std::span<domain::Reading> out) override;
   [[nodiscard]] std::chrono::milliseconds period() const override { return period_; }
   [[nodiscard]] std::span<const domain::ChannelSpec> channels() const override { return channels_; }
 
-  /// @brief 値を変える（テスト・シナリオ用）。
+  /// @brief 値を変える（テスト・デバッグ入力用）。
   void set_value(std::size_t index, std::int32_t value_milli);
-  /// @brief 品質を変える（テスト・シナリオ用）。
+  /// @brief チャネル名で値を変える（テスト・デバッグ入力用）。
+  /// @return このセンサーのチャネルでなければ false
+  bool set_channel_value(std::string_view channel, std::int32_t value_milli);
+  /// @brief 品質を変える（テスト用。読めたうえで品質が good でない場合）。
   void set_quality(domain::Quality q) { quality_ = q; }
+  /// @brief 故障を注入する。true の間は read も init も失敗する（テスト・デバッグ入力用）。
+  void set_fault(bool fault) { fault_ = fault; }
+  /// @brief init を呼んだ回数（再初期化のテスト用）。
+  [[nodiscard]] std::uint32_t init_count() const { return init_count_; }
 
  private:
   std::string_view id_;
@@ -41,6 +48,8 @@ class SimSensor final : public domain::ISensor {
   support::StaticVector<std::int32_t, kMaxChannels> values_{};
   std::chrono::milliseconds period_;
   domain::Quality quality_{domain::Quality::Good};
+  bool fault_{false};
+  std::uint32_t init_count_{0};
 };
 
 /// @brief ホスト用の模擬アクチュエーター。受けた level を覚えて返すだけ。
