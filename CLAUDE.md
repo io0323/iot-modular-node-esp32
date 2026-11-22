@@ -24,8 +24,9 @@ IoT・組込みポートフォリオ4作品のうちの1つで、上位（作品
 
 ## コードの決まり
 
-- 層と依存の向き：`app → domain`、`app → infra`（インターフェース）、`drivers → domain`、`infra → support`、`platform → infra・drivers`（実装を提供する）、すべて `→ support`。逆向きのリンクを作らない。CMake のターゲットを層ごとに分ける
-- ESP-IDF・Paho・POSIX・`<thread>`・`<mutex>` のヘッダを include できるのは `src/platform/` の下だけ
+- 層と依存の向き：`app → domain`、`app → infra`（インターフェース）、`drivers → domain・hal`、`infra → support`、`hal → support`（`src/hal/` はハードのインターフェースだけ。II2cBus・IAdc・IPwm・IGpio・IMutex）、`platform → hal・infra・drivers`（実装を提供する）、すべて `→ support`。逆向きのリンクを作らない。CMake のターゲットを層ごとに分ける
+- `src/hal/` は自作 iot-hal の取り込み（open-questions #5）が決まったら置き換える前提で作る
+- ESP-IDF・Paho・POSIX・`<thread>`・`<mutex>` のヘッダを include できるのは `src/platform/` の下だけ。`src/drivers/`（`src/drivers/fake/` を除く）は `src/platform/` のヘッダを include しない
 - C++20。製品コードは `-fno-exceptions -fno-rtti`。警告は `-Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast -Wnon-virtual-dtor -Woverloaded-virtual -Wnull-dereference`。外部ライブラリには警告設定を当てない
 - app・domain・drivers・infra は初期化完了後にヒープを確保しない。`new`・`malloc`・`std::string`・`std::vector`・`std::map`・`std::function`・`std::shared_ptr` を使わない。`std::array`、`std::span`、`std::string_view`、`src/support/` の固定容量コンテナを使う
 - エラーは例外ではなく `support::Result<T>` で返す。戻り値を無視しない（`[[nodiscard]]`）
