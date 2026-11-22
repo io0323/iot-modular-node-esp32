@@ -18,6 +18,8 @@ using test::json_value;
 class NodeFakeHwTest : public ::testing::Test {
  protected:
   test::FakeClock clock;
+  test::FakeTimeSync sync;
+  test::FakeNetwork network;
   test::FakeRandom rng;
   test::FakeMqttLink link;
   test::CapturingLog log;
@@ -28,7 +30,7 @@ class NodeFakeHwTest : public ::testing::Test {
 
   void SetUp() override {
     NodeConfig cfg{};
-    node = std::make_unique<Node>(cfg, rig.registry(), link, clock, rng, log);
+    node = std::make_unique<Node>(cfg, rig.registry(), link, network, sync, clock, rng, log);
     ASSERT_TRUE(node->start());
     run_for(100);
   }

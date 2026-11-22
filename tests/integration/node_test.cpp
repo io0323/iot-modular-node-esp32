@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "app/node.hpp"
+#include "infra/formats.hpp"
 #include "config/devices.hpp"
 #include "domain/pump_interlock.hpp"
 #include "drivers/sim/sim_sensor.hpp"
@@ -43,6 +44,8 @@ constexpr std::string_view kCmdTopic = "iot/v1/home/mcu-cpp-01/cmd";
 class NodeTest : public ::testing::Test {
  protected:
   test::FakeClock clock;
+  test::FakeTimeSync sync;
+  test::FakeNetwork network;
   test::FakeRandom rng;
   test::FakeMqttLink link;
   test::CapturingLog log;
@@ -65,7 +68,8 @@ class NodeTest : public ::testing::Test {
   void SetUp() override {
     NodeConfig cfg{};
     cfg.password = "secret";
-    node = std::make_unique<Node>(cfg, domain::DeviceRegistry(sensors, actuators, config::kRules), link, clock, rng,
+    node = std::make_unique<Node>(cfg, domain::DeviceRegistry(sensors, actuators, config::kRules), link, network,
+                                  sync, clock, rng,
                                   log);
     ASSERT_TRUE(node->start());
   }
@@ -450,6 +454,145 @@ TEST_F(NodeTest, TempSensorFaultForcesFanOn) {
   ASSERT_TRUE(run_until([&] { return fan.current() == 0; }, 31'000));
   EXPECT_EQ(events_with("INTERLOCK_RELEASED").size(), 1U);
   EXPECT_EQ(events_with("SENSOR_RECOVERED").size(), 3U);
+}
+
+// ---- P4：通信の作り込み
+
+/// ts（ISO 8601）を UTC の ms に
+std::int64_t ts_ms(const std::string& message) { return infra::parse_ts(json_value(message, "ts").value_or("")).value_or(-1); }
+
+TEST_F(NodeTest, Nfr02_OutputAndAckFinishWithinTheTickThatReceivedCmd) {
+  run_for(100);
+  const auto acks = link.on("cmd/ack").size();
+  send(make_cmd(ulid(20), "set_actuator", R"({"id":"fan_main","level":800})", "auto", R"("lease_s":30)"));
+  node->tick();  // 時計を進めずに1周だけ
+  EXPECT_EQ(fan.current(), 800);
+  ASSERT_EQ(link.on("cmd/ack").size(), acks + 1);
+  EXPECT_EQ(json_value(last_ack(), "status"), "done");
+}
+
+TEST_F(NodeTest, CmdAckIsNotResentAfterReconnect) {
+  run_for(100);
+  link.auto_puback = false;
+  send(make_cmd(ulid(21), "set_actuator", R"({"id":"fan_main","level":500})", "auto", R"("lease_s":30)"));
+  run_for(10);
+  ASSERT_EQ(link.on("cmd/ack").size(), 1U);
+  link.drop();
+  link.auto_puback = true;
+  run_for(1500);
+  ASSERT_EQ(link.connects.size(), 2U);
+  EXPECT_EQ(link.on("cmd/ack").size(), 1U);
+}
+
+TEST_F(NodeTest, NoLostOrRestoredBeforeFirstConnect) {
+  link.accept_connect = false;
+  run_for(5000);
+  link.accept_connect = true;
+  run_for(20000);
+  EXPECT_FALSE(events_with("BOOT").empty());
+  EXPECT_TRUE(events_with("UPSTREAM_LOST").empty());
+  EXPECT_TRUE(events_with("UPSTREAM_RESTORED").empty());
+}
+
+TEST_F(NodeTest, P4Scenario1_SntpDelayHoldsEverythingThenSendsWithOccurrenceTs) {
+  // 同期前は「同期の差」が分からない（ここでは 0）。10秒後に同期して差が分かる
+  sync.set_synced(false);
+  sync.set_offset(0);
+  run_for(3000);
+  soil.set_fault(true);  // 起動から3秒で土壌水分センサーが故障
+  run_for(7000);
+  EXPECT_TRUE(link.connects.empty());  // 同期まで MQTT に接続しない
+  EXPECT_TRUE(link.published.empty());
+  sync.set_offset(test::FakeTimeSync::kSampleTs);
+  sync.set_synced(true);
+  ASSERT_TRUE(run_until([&] { return !events_with("SENSOR_FAULT").empty(); }, 15000));
+
+  ASSERT_GE(link.published.size(), 3U);
+  EXPECT_EQ(json_value(link.published[0].payload, "status"), "online");  // state が最初
+  const auto boot = events_with("BOOT");
+  const auto fault = events_with("SENSOR_FAULT");
+  ASSERT_EQ(boot.size(), 1U);
+  EXPECT_EQ(json_value(boot[0].payload, "ts"), "2026-11-20T06:00:13.345Z");  // 起動時刻（単調時計 1000ms）
+  EXPECT_EQ(json_value(boot[0].payload, "uptime_ms"), "0");
+  EXPECT_EQ(json_value(boot[0].payload, "seq"), "0");
+  EXPECT_EQ(json_value(fault[0].payload, "channel"), "soil");
+  EXPECT_EQ(json_value(fault[0].payload, "seq"), "1");
+  // SENSOR_FAULT の ts は「同期の差＋発生時の単調時計」、uptime_ms は発生時の値
+  const std::uint64_t up = std::stoull(json_value(fault[0].payload, "uptime_ms").value_or("0"));
+  EXPECT_GE(up, 3000U);
+  EXPECT_EQ(ts_ms(fault[0].payload), test::FakeTimeSync::kSampleTs + 1000 + static_cast<std::int64_t>(up));
+  EXPECT_TRUE(events_with("UPSTREAM_LOST").empty());
+}
+
+TEST_F(NodeTest, P4Scenario2_FortyEventsDuringOutageKeepThirtyTwoAndRestoredCountsEight) {
+  run_for(100);
+  ASSERT_EQ(events_with("BOOT").size(), 1U);
+  link.accept_connect = false;
+  link.drop();
+  run_for(10);  // 切断を受ける（ここが切れた時刻）
+  const std::uint64_t lost_mono = clock.monotonic_ms();
+  const std::size_t before = link.published.size();
+  for (int i = 0; i < 40; ++i) {
+    node->press_button();  // MODE_CHANGED を1件
+    run_for(10);
+  }
+  run_for(3000);
+  link.accept_connect = true;
+  ASSERT_TRUE(run_until([&] { return !events_with("UPSTREAM_RESTORED").empty(); }, 70000));
+
+  std::vector<test::FakeMqttLink::Published> after(link.published.begin() + static_cast<std::ptrdiff_t>(before),
+                                                   link.published.end());
+  std::vector<std::string> kinds;
+  for (const auto& p : after) {
+    if (p.topic.ends_with("/state")) kinds.push_back("state");
+    if (p.topic.ends_with("/event")) kinds.push_back(json_value(p.payload, "code").value_or(""));
+  }
+  ASSERT_GE(kinds.size(), 35U);
+  EXPECT_EQ(kinds[0], "state");
+  EXPECT_EQ(json_value(after[0].payload, "status"), "online");
+  EXPECT_EQ(kinds[1], "UPSTREAM_LOST");
+  for (std::size_t i = 2; i < 34; ++i) EXPECT_EQ(kinds[i], "MODE_CHANGED") << i;
+  EXPECT_EQ(kinds[34], "UPSTREAM_RESTORED");
+  const auto lost = events_with("UPSTREAM_LOST");
+  EXPECT_EQ(ts_ms(lost[0].payload), test::FakeTimeSync::kSampleTs + static_cast<std::int64_t>(lost_mono));
+  // 古いものから8件捨てた：残りの最初は9件目（10ms 刻みで押した）
+  const auto modes = events_with("MODE_CHANGED");
+  ASSERT_EQ(modes.size(), 32U);
+  EXPECT_EQ(ts_ms(modes[0].payload) - ts_ms(lost[0].payload), 8 * 10);
+  const auto restored = events_with("UPSTREAM_RESTORED");
+  EXPECT_EQ(json_value(restored[0].payload, "dropped"), "8");
+  EXPECT_EQ(json_value(restored[0].payload, "down_ms"),
+            std::to_string(static_cast<std::uint64_t>(ts_ms(restored[0].payload) - ts_ms(lost[0].payload))));
+  EXPECT_EQ(json_value(restored[0].payload, "severity"), "info");
+  EXPECT_EQ(json_value(lost[0].payload, "severity"), "warning");
+}
+
+TEST_F(NodeTest, P4Scenario3_UnackedEventIsResentWithSameMsgIdAfterReconnect) {
+  run_for(100);
+  link.auto_puback = false;
+  node->press_button();
+  run_for(10);
+  const auto sent = events_with("MODE_CHANGED");
+  ASSERT_EQ(sent.size(), 1U);
+  link.drop();  // PUBACK が来る前に切れた
+  link.auto_puback = true;
+  ASSERT_TRUE(run_until([&] { return !events_with("UPSTREAM_RESTORED").empty(); }, 5000));
+  const auto again = events_with("MODE_CHANGED");
+  ASSERT_EQ(again.size(), 2U);
+  EXPECT_EQ(again[1].payload, sent[0].payload);  // msg_id・seq・ts も同じ電文
+  EXPECT_EQ(json_value(again[1].payload, "msg_id"), json_value(sent[0].payload, "msg_id"));
+}
+
+TEST_F(NodeTest, NetworkDownDisconnectsMqttAndReconnectsAfterNetworkReturns) {
+  run_for(100);
+  network.go_down();
+  run_for(10);
+  EXPECT_EQ(link.disconnects, 1);
+  run_for(5000);
+  EXPECT_EQ(link.connects.size(), 1U);  // ネットワークが戻るまで MQTT は試さない
+  network.go_up();
+  ASSERT_TRUE(run_until([&] { return !events_with("UPSTREAM_RESTORED").empty(); }, 70000));
+  EXPECT_EQ(link.connects.size(), 2U);
 }
 
 }  // namespace

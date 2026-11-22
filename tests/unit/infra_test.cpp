@@ -146,15 +146,17 @@ TEST(Ulid, MadeUlidsAreValidAndDistinct) {
 
 TEST(Envelope, BootIdIsEightLowerHex) {
   test::FakeClock clock;
+  test::FakeTimeSync sync;
   test::FakeRandom rng;
-  EnvelopeFactory f("mcu-cpp-01", clock, rng);
+  EnvelopeFactory f("mcu-cpp-01", clock, sync, rng);
   EXPECT_TRUE(std::regex_match(std::string(f.boot_id()), std::regex("^[0-9a-f]{8}$")));
 }
 
 TEST(Envelope, SeqPerKindStartsAtZeroAndWraps) {
   test::FakeClock clock;
+  test::FakeTimeSync sync;
   test::FakeRandom rng;
-  EnvelopeFactory f("mcu-cpp-01", clock, rng);
+  EnvelopeFactory f("mcu-cpp-01", clock, sync, rng);
   EXPECT_EQ(f.peek_seq(Kind::Telemetry), 0U);
   f.commit_seq(Kind::Telemetry);
   f.commit_seq(Kind::Telemetry);
@@ -166,8 +168,9 @@ TEST(Envelope, SeqPerKindStartsAtZeroAndWraps) {
 
 TEST(Envelope, SeqWrapsAtUint32) {
   test::FakeClock clock;
+  test::FakeTimeSync sync;
   test::FakeRandom rng;
-  EnvelopeFactory f("mcu-cpp-01", clock, rng);
+  EnvelopeFactory f("mcu-cpp-01", clock, sync, rng);
   f.set_seq_for_test(Kind::Telemetry, 0xFFFFFFFFU);
   f.commit_seq(Kind::Telemetry);
   EXPECT_EQ(f.peek_seq(Kind::Telemetry), 0U);
@@ -175,8 +178,9 @@ TEST(Envelope, SeqWrapsAtUint32) {
 
 TEST(Envelope, WritesAllFieldsInShape) {
   test::FakeClock clock;
+  test::FakeTimeSync sync;
   test::FakeRandom rng;
-  EnvelopeFactory f("mcu-cpp-01", clock, rng);
+  EnvelopeFactory f("mcu-cpp-01", clock, sync, rng);
   clock.advance(250);
   std::array<char, 512> buf{};
   JsonWriter w(buf);
@@ -189,12 +193,33 @@ TEST(Envelope, WritesAllFieldsInShape) {
   EXPECT_EQ(test::json_value(m, "device_id"), "mcu-cpp-01");
   EXPECT_EQ(test::json_value(m, "seq"), "7");
   EXPECT_EQ(test::json_value(m, "boot_id"), std::string(f.boot_id()));
-  // FakeClock の単調時計は 1000ms から始まり、UTC も同じだけ進む
+  // FakeClock の単調時計は 1000ms から始まり、FakeTimeSync で単調時計 0 が 06:00:12.345Z
   EXPECT_EQ(test::json_value(m, "ts"), "2026-11-20T06:00:13.595Z");
   EXPECT_EQ(test::json_value(m, "ts_source"), "device");
   EXPECT_EQ(test::json_value(m, "uptime_ms"), "250");
   EXPECT_TRUE(is_ulid(test::json_value(m, "msg_id").value_or("")));
   EXPECT_EQ(test::json_value(m, "payload"), "{}");
+}
+
+TEST(Envelope, TsIsMonotonicPlusOffsetAndUptimeIsAtStamp) {
+  test::FakeClock clock;
+  test::FakeTimeSync sync;
+  test::FakeRandom rng;
+  EnvelopeFactory f("mcu-cpp-01", clock, sync, rng);
+  clock.advance(500);
+  const Stamp s = f.now();  // 発生時刻（単調時計 1500ms）
+  clock.advance(10000);     // 送るのは 10 秒後
+  sync.set_offset(test::FakeTimeSync::kSampleTs + 60000);  // その間に同期で1分ずれを直した
+  EXPECT_EQ(f.utc_of(s), test::FakeTimeSync::kSampleTs + 1500 + 60000);
+  EXPECT_EQ(f.uptime_of(s), 500U);
+  std::array<char, 512> buf{};
+  JsonWriter w(buf);
+  f.begin(w, Kind::Event, 3, s);
+  w.begin_object().end_object();
+  w.end_object();
+  ASSERT_TRUE(w.ok());
+  EXPECT_EQ(test::json_value(w.view(), "ts"), "2026-11-20T06:01:13.845Z");
+  EXPECT_EQ(test::json_value(w.view(), "uptime_ms"), "500");
 }
 
 // ---- トピック
