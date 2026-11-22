@@ -1,9 +1,8 @@
 name: ci
 
+# すべてのブランチへの push で動かす（PR の画面には同じコミットの結果が出る）。PR を作る前に CI の合格を確かめるため
 on:
   push:
-    branches: [main]
-  pull_request:
 
 jobs:
   host:
