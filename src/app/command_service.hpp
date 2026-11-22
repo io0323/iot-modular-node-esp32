@@ -5,8 +5,8 @@
 #include <string_view>
 
 #include "app/control_arbiter.hpp"
+#include "app/mode_manager.hpp"
 #include "domain/cmd_dedup_cache.hpp"
-#include "domain/reading_store.hpp"
 #include "domain/types.hpp"
 #include "infra/cmd_parser.hpp"
 
@@ -34,8 +34,8 @@ struct CommandOutcome {
   infra::DiscardReason discard{infra::DiscardReason::NotJson};  ///< Discarded のときの理由
   bool duplicate{false};                                       ///< 重複した cmd_id（実行していない）
   domain::CmdDedupCache::Payload ack_payload{};                ///< cmd/ack の payload（"{...}"）
-  bool republish_state{false};                                 ///< state を出し直す
-  std::optional<domain::Mode> mode_changed_to{};               ///< モードを切り替えた（MODE_CHANGED を送る）
+  bool republish_state{false};                                 ///< state を出し直す（get_status）
+  std::optional<ModeChange> mode_change{};                     ///< モードを切り替えた（MODE_CHANGED と state）
   ControlArbiter::InterlockChanges interlock_changes{};        ///< 指令で起きたインターロックの遷移
 };
 
@@ -47,8 +47,8 @@ class CommandService {
  public:
   /// @brief 依存を受け取る。
   /// @param arbiter 出力の調停
-  /// @param store 最新の計測値（土壌水分の故障の判定に使う）
-  CommandService(ControlArbiter& arbiter, const domain::ReadingStore& store) : arbiter_(arbiter), store_(store) {}
+  /// @param modes モード（set_mode を渡す）
+  CommandService(ControlArbiter& arbiter, ModeManager& modes) : arbiter_(arbiter), modes_(modes) {}
 
   /// @brief cmd の電文を処理する。
   /// @param json 受信した電文
@@ -56,8 +56,6 @@ class CommandService {
   /// @param now_utc_ms いまの UTC（expires_at の判定）
   /// @return 結果
   CommandOutcome handle(std::string_view json, std::uint64_t now_ms, std::int64_t now_utc_ms);
-
-  [[nodiscard]] domain::Mode mode() const { return mode_; }
 
  private:
   struct Exec {
@@ -69,12 +67,11 @@ class CommandService {
   Exec execute(const infra::CmdRequest& req, std::uint64_t now_ms, std::int64_t now_utc_ms, CommandOutcome& out);
   Exec set_actuator(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);
   Exec release(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);
-  Exec set_mode(const infra::CmdRequest& req, CommandOutcome& out);
+  Exec set_mode(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);
 
   ControlArbiter& arbiter_;
-  const domain::ReadingStore& store_;
+  ModeManager& modes_;
   domain::CmdDedupCache cache_{};
-  domain::Mode mode_{domain::Mode::Auto};
 };
 
 }  // namespace node::app

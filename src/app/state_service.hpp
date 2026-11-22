@@ -28,7 +28,8 @@ class StateService {
   /// @param w 書き込み先
   /// @param online online なら true、offline なら false
   /// @param mode いまのモード
-  void write_payload(infra::JsonWriter& w, bool online, domain::Mode mode) const;
+  /// @param period_factor 計測周期の倍率（省電力モードは5。channels[].period_ms に掛ける）
+  void write_payload(infra::JsonWriter& w, bool online, domain::Mode mode, std::uint32_t period_factor = 1) const;
 
  private:
   std::span<domain::ISensor* const> sensors_;

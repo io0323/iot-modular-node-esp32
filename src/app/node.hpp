@@ -8,7 +8,11 @@
 #include "app/command_service.hpp"
 #include "app/control_arbiter.hpp"
 #include "app/event_service.hpp"
+#include "app/manual_control.hpp"
+#include "app/mode_manager.hpp"
 #include "app/publisher.hpp"
+#include "app/rule_engine.hpp"
+#include "app/sensor_poller.hpp"
 #include "app/state_service.hpp"
 #include "app/telemetry_service.hpp"
 #include "domain/device.hpp"
@@ -37,6 +41,9 @@ struct NodeConfig {
 };
 
 /// @brief 作品02のアプリ全体。サービスを組み立て、tick で1周ずつ動かす。アプリのロジックは1つのスレッドだけで動かす。
+///
+/// tick の順番：接続状態 → 計測（SensorPoller）→ 手動モードのタイムアウト → 受信した cmd → ローカルルール
+/// → 調停（ControlArbiter）→ telemetry → 再送待ちとイベントの送信。
 class Node {
  public:
   static constexpr std::size_t kMaxInboundPerTick = 16;
@@ -51,16 +58,20 @@ class Node {
   /// @brief 正常終了の前に offline の state を送る（seq を進めない）。
   void shutdown();
 
+  /// @brief ボタンの短押し（P3 で GPIO から呼ぶ。P2 はテストとデバッグ入力から）。
+  void press_button();
+  /// @brief 本体の手動操作（手動モードのときだけ受け付ける）。
+  ManualControl::Outcome set_manual(std::string_view id, domain::Level level);
+
   [[nodiscard]] std::string_view boot_id() const { return envelope_.boot_id(); }
-  [[nodiscard]] domain::Mode mode() const { return commands_.mode(); }
+  [[nodiscard]] domain::Mode mode() const { return modes_.mode(); }
   [[nodiscard]] const ControlArbiter& arbiter() const { return arbiter_; }
+  [[nodiscard]] const domain::ReadingStore& readings() const { return store_; }
   [[nodiscard]] const Publisher& publisher() const { return publisher_; }
   [[nodiscard]] std::uint32_t discarded(infra::DiscardReason r) const {
     return discards_[static_cast<std::size_t>(r)];
   }
   [[nodiscard]] std::size_t pending_events() const { return events_.pending(); }
-  /// @brief いまの LWT の電文（接続のたびに作り直す）。
-  [[nodiscard]] std::string_view will_payload() const { return {will_buf_.data(), will_len_}; }
 
  private:
   enum class LinkState : std::uint8_t { Disconnected, Connecting, Connected };
@@ -70,6 +81,10 @@ class Node {
   void on_connected();
   void handle_inbound(std::uint64_t now);
   void apply_outcome(const CommandOutcome& outcome);
+  void on_mode_change(const ModeChange& change);
+  void apply_mode_state();
+  void run_rules(std::uint64_t now);
+  void post_sensor_events(const SensorPoller::Result& r);
   void post_interlock_events(const ControlArbiter::InterlockChanges& changes);
   void publish_state();
   std::string_view build_offline_state(std::array<char, Publisher::kMessageMax>& buf);
@@ -87,6 +102,10 @@ class Node {
   Publisher publisher_;
   domain::ReadingStore store_{};
   ControlArbiter arbiter_;
+  ModeManager modes_{};
+  ManualControl manual_;
+  RuleEngine rules_;
+  SensorPoller poller_;
   CommandService commands_;
   EventService events_{};
   StateService state_;
@@ -95,8 +114,9 @@ class Node {
   LinkState link_state_{LinkState::Disconnected};
   std::uint64_t next_connect_ms_{0};
   std::uint64_t next_diag_ms_{0};
+  SensorPoller::Result poll_{};
+  RuleEngine::Proposals proposals_{};
   std::array<char, Publisher::kMessageMax> will_buf_{};
-  std::size_t will_len_{0};
   std::array<char, Publisher::kMessageMax> work_buf_{};
   std::array<char, Publisher::kMessageMax + 256> log_buf_{};
   infra::InboundMessage inbound_{};
