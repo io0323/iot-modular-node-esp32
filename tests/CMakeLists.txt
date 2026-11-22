@@ -1,0 +1,23 @@
+include(GoogleTest)
+
+function(node_add_test name)
+  add_executable(${name} ${ARGN})
+  target_include_directories(${name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(${name} PRIVATE node_app node_config GTest::gmock_main)
+  target_compile_definitions(${name} PRIVATE NODE_IOTSPEC_DIR="${NODE_IOTSPEC_DIR}")
+  node_test_target(${name})
+  gtest_discover_tests(${name} DISCOVERY_TIMEOUT 30)
+endfunction()
+
+# 単体テスト
+node_add_test(unit_support unit/support_test.cpp)
+node_add_test(unit_domain unit/domain_test.cpp)
+node_add_test(unit_infra unit/infra_test.cpp)
+node_add_test(unit_cmd_parser unit/cmd_parser_test.cpp)
+node_add_test(unit_control_arbiter unit/control_arbiter_test.cpp)
+node_add_test(unit_command_service unit/command_service_test.cpp)
+node_add_test(unit_services unit/services_test.cpp)
+node_add_test(unit_spec_samples unit/spec_samples_test.cpp)
+
+# ホスト結合テスト（FakeMqttLink と仮想時計でアプリ全体を動かす）
+node_add_test(integration_node integration/node_test.cpp)
