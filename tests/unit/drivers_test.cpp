@@ -252,7 +252,9 @@ TEST_F(ButtonTest, LongPressFiresAtExactly1000msWithoutRelease) {
   while (ev == domain::ButtonEvent::None) {
     now += 20;
     ev = button.poll(now);
-    if (now - pressed_at < 1000) ASSERT_EQ(ev, domain::ButtonEvent::None) << now - pressed_at;
+    if (now - pressed_at < 1000) {
+      ASSERT_EQ(ev, domain::ButtonEvent::None) << now - pressed_at;
+    }
   }
   EXPECT_EQ(ev, domain::ButtonEvent::Long);
   EXPECT_EQ(now - pressed_at, 1000U);  // ちょうど 1,000ms
