@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <optional>
 
-#include "config/devices.hpp"
 
 namespace node::platform {
 namespace {
@@ -60,7 +59,7 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
     }
     const std::string channel(value.substr(0, eq));
     const auto v = number(left);
-    if (!v || config::sim_sensor_by_channel(channel) == nullptr) {
+    if (!v || channel.empty()) {
       error = "--sim: 値かチャネルが違う: " + std::string(value);
       return true;
     }
@@ -80,7 +79,7 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
     const std::size_t dash = range.find('-');
     const auto start = seconds_to_ms(range.substr(0, dash));
     const auto end = dash == std::string_view::npos ? std::optional<std::uint64_t>(unused) : seconds_to_ms(range.substr(dash + 1));
-    if (!start || !end || config::sim_sensor_by_id(id) == nullptr || (dash != std::string_view::npos && *end <= *start)) {
+    if (!start || !end || id.empty() || (dash != std::string_view::npos && *end <= *start)) {
       error = "--sim-fault: センサーIDか時刻が違う: " + std::string(value);
       return true;
     }
@@ -116,23 +115,21 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
   return false;
 }
 
-void DebugInputs::apply_due(std::uint64_t elapsed_ms, app::Node& node, infra::ILogSink& log) {
+void DebugInputs::apply_due(std::uint64_t elapsed_ms, app::Node& node, IDebugTarget& target, infra::ILogSink& log) {
   for (Action& a : actions_) {
     if (a.done || elapsed_ms < a.at_ms) continue;
     a.done = true;
     switch (a.type) {
       case Type::SetValue: {
-        drivers::SimSensor* s = config::sim_sensor_by_channel(a.target);
-        const bool ok = s != nullptr && s->set_channel_value(a.target, a.value);
+        const bool ok = target.set_value(a.target, static_cast<double>(a.value) / 1000.0);
         log_debug(log, "sim", a.target, a.value, ok ? "applied" : "unknown_channel");
         break;
       }
       case Type::FaultOn:
       case Type::FaultOff: {
-        drivers::SimSensor* s = config::sim_sensor_by_id(a.target);
-        if (s != nullptr) s->set_fault(a.type == Type::FaultOn);
+        const bool ok = target.set_fault(a.target, a.type == Type::FaultOn);
         log_debug(log, a.type == Type::FaultOn ? "sim_fault_on" : "sim_fault_off", a.target, 0,
-                  s != nullptr ? "applied" : "unknown_sensor");
+                  ok ? "applied" : "unknown_sensor");
         break;
       }
       case Type::Press:
