@@ -5,9 +5,11 @@
 種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
 機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P3）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
+**いまの段階（P4）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
 制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
 機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
+通信は「ネットワーク → 時刻の同期 → MQTT」の順に接続し、切れたら 1・2・4…60 秒の間隔でつなぎ直します。送れない間のイベントは32件まで保持し、
+確認の取れなかった event は同じ電文のまま送り直し、つなぎ直したら UPSTREAM_LOST・UPSTREAM_RESTORED で切れていた間を知らせます。
 ESP-IDF のターゲット版・実機のドライバ・エミュレーターはまだありません（下の「フェーズ」）。**実機では確かめていません。**
 
 ## 対応する共通仕様
@@ -46,6 +48,15 @@ IOTSPEC_MQTT_PASSWORD=iotspec-dev \
   iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host/mcu_cpp_01 --log contract-log.jsonl" --junit contract.xml
 ```
 
+### ブローカーの停止・再開の試験
+
+Mosquitto を `docker compose stop`／`start` で20秒止めて戻し、再接続（60秒以内）・UPSTREAM_LOST → 停止中のイベント → UPSTREAM_RESTORED の順・
+最後に強制終了したときの LWT を observer で確かめます（CI でも流しています）。
+
+```sh
+IOTSPEC_MQTT_PASSWORD=iotspec-dev uv run tests/system/broker_restart.py
+```
+
 ## 動かし方（ホスト版）
 
 ```sh
@@ -72,10 +83,14 @@ SIGTERM・SIGINT では offline の state を送ってから切断します。�
 | `--sim-fault <センサーID>@<開始秒>[-<終了秒>]` | 模擬センサーを読めなくする（センサー ID は `bme280`・`bh1750`・`soil_moisture`。fakehw では I2C のタイムアウトか ADC の故障） |
 | `--press-at <秒>` | ボタンの短押しを1回入れる（自動 → 手動 → 省電力 → 自動） |
 | `--manual <id>=<level>@<秒>` | 手動の出力を入れる（手動モードでなければ無視してログに残す） |
+| `--sntp-delay <秒>` | 起動から指定秒は時刻が同期していないことにする（その間は MQTT に接続しない。イベントは発生時刻で保持する） |
+| `--net-down <開始秒>-<終了秒>` | その間ネットワークが使えないことにする（複数指定可。MQTT を自分で切るので LWT は出ない。open-questions #76） |
 
 ```sh
 # 気温を5秒後に46℃、20秒後に42℃にする（ファンの高温インターロックが効いて、10秒後に解除される）
 ./build/host/mcu_cpp_01 --log run.jsonl --sim temp_air=46@5 --sim temp_air=42@20
+# 5〜12秒はネットワークが使えない。その間の8秒に土壌水分センサーを故障させる（戻った後に LOST → SENSOR_FAULT → RESTORED）
+./build/host/mcu_cpp_01 --log run.jsonl --net-down 5-12 --sim-fault soil_moisture@8
 ```
 
 ## 制御の調停
@@ -115,14 +130,15 @@ src/
   support/        Result・Error・固定容量コンテナ（自作 Error Framework の仮の代わり）
   hal/            ハードのインターフェースだけ（I2C・ADC・PWM・GPIO・ミューテックス・タイマー。自作 iot-hal に置き換える前提）
   domain/         値・機器の契約（ISensor・IActuator・IInterlock・IButton・IDisplay）・リース・重複排除・インターロック3種・ルール・計測値と品質
-  app/            ControlArbiter・ModeManager・ManualControl・RuleEngine・SensorPoller・UiService・CommandService・Telemetry・State・Event・Node
-  infra/          IMqttLink・IClock・IRandom・JsonWriter・CmdParser・エンベロープ・トピック・送信量の制限
+  app/            ControlArbiter・ModeManager・ManualControl・RuleEngine・SensorPoller・UiService・CommandService・Telemetry・State・Event・
+                  ConnectionManager・Publisher・Node
+  infra/          IMqttLink・INetwork・ITimeSync・IClock・IRandom・JsonWriter・CmdParser・エンベロープ・トピック・送信量の制限
   drivers/        機器のドライバ（データシートどおり）
   drivers/fake/   hal と機器のフェイク（テストと --devices fakehw）
   drivers/sim/    ホスト用の模擬センサー・模擬アクチュエーター
   config/         構成表（devices.cpp：模擬機器、fakehw.cpp：ドライバとフェイク）
-  platform/host/  Paho・時計・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
-tests/unit/  tests/integration/
+  platform/host/  Paho・時計・時刻の同期・ネットワーク（模擬）・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
+tests/unit/  tests/integration/  tests/system/（broker_restart.py）
 ```
 
 ## フェーズ
@@ -131,11 +147,11 @@ tests/unit/  tests/integration/
 |---|---|---|
 | P1 | ホスト版の骨組み、MQTT 接続、cmd の受け付け、CI での契約テスト | 完了（PR #1） |
 | P2 | ControlArbiter の5段の優先度、ModeManager、RuleEngine、インターロックの残り | 完了（PR #2） |
-| P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 進行中 |
-| P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | — |
+| P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 完了（PR #3） |
+| P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 進行中 |
 | P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | — |
 | P6 | ESP-IDF ターゲット版 | — |
 | P7 | エミュレーター（QEMU・Wokwi） | — |
 | P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)）、[未決の論点](docs/open-questions.md)。
+書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)）、[未決の論点](docs/open-questions.md)。

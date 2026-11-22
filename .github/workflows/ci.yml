@@ -6,7 +6,7 @@ on:
 
 jobs:
   host:
-    name: host（ビルド・CTest・契約テスト）
+    name: host（ビルド・CTest・契約テスト・ブローカー再起動）
     runs-on: ubuntu-24.04
     env:
       IOTSPEC_MQTT_URL: mqtt://localhost:1883
@@ -63,6 +63,11 @@ jobs:
         if: always()
         run: iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host/mcu_cpp_01 --devices fakehw --log contract-fakehw-log.jsonl" --junit contract-fakehw.xml
 
+      - name: ブローカーの停止・再開（tests/system/broker_restart.py、既定の構成）
+        if: always()
+        shell: bash  # -o pipefail（tee で失敗を隠さない）
+        run: uv run tests/system/broker_restart.py --log broker-restart-log.jsonl 2>&1 | tee broker-restart.txt
+
       - name: ASan・UBSan の指摘がないこと
         if: always()
         run: |
@@ -82,6 +87,8 @@ jobs:
             contract-log.jsonl
             contract-fakehw.xml
             contract-fakehw-log.jsonl
+            broker-restart.txt
+            broker-restart-log.jsonl
             mosquitto.log
             sanitizer/
           if-no-files-found: warn
