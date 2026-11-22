@@ -75,6 +75,8 @@ class ControlArbiter {
   [[nodiscard]] const domain::ActuatorSpec& spec(std::size_t i) const { return slots_[i].actuator->spec(); }
   [[nodiscard]] domain::Level output(std::size_t i) const { return slots_[i].output; }
   [[nodiscard]] domain::Owner owner(std::size_t i) const { return slots_[i].owner; }
+  /// @brief 本体の手動操作の値（なければ std::nullopt）。
+  [[nodiscard]] std::optional<domain::Level> manual(std::size_t i) const { return slots_[i].manual; }
   /// @brief 出力に失敗した回数（診断用）。
   [[nodiscard]] std::uint32_t apply_errors() const { return apply_errors_; }
 
@@ -91,6 +93,7 @@ class ControlArbiter {
     std::optional<domain::Level> rule{};
     domain::Level output{0};
     domain::Owner owner{domain::Owner::None};
+    std::uint64_t switched_at_ms{0};  ///< 最後に 0 と 0 より大きい値を切り替えた時刻（最小オン・オフ時間）
   };
 
   /// 段の結果（インターロックをかける前）
@@ -101,6 +104,7 @@ class ControlArbiter {
 
   [[nodiscard]] StageResult stages(const Slot& s) const;
   domain::Level apply_interlocks(Slot& s, domain::Level pre, std::uint64_t now_ms, InterlockChanges& changes);
+  [[nodiscard]] static domain::Level hold_for_min_time(const Slot& s, domain::Level wanted, std::uint64_t now_ms);
   void evaluate(Slot& s, std::uint64_t now_ms, InterlockChanges& changes);
 
   const domain::ReadingStore& store_;

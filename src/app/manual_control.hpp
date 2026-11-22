@@ -29,9 +29,19 @@ class ManualControl {
   /// @brief 手動の設定をすべて消す（手動モードを出たとき）。
   void clear() { arbiter_.clear_manual(); }
 
+  /// @brief 操作する機器を次に選び直す（構成表の順に一周する。P3 の決定 #34）。手動モードでなければ何もしない。
+  Outcome select_next();
+  /// @brief 選んでいる機器を 0 と 1000 で切り替える（P3 の決定 #34）。手動モードでなければ何もしない。
+  Outcome toggle_selected(std::uint64_t now_ms);
+  /// @brief 選んでいる機器の番号。
+  [[nodiscard]] std::size_t selected() const { return selected_; }
+  /// @brief 選んでいる機器の ID。
+  [[nodiscard]] std::string_view selected_id() const;
+
  private:
   ControlArbiter& arbiter_;
   ModeManager& modes_;
+  std::size_t selected_{0};
 };
 
 /// @brief 結果の文字列（ログ用）。
