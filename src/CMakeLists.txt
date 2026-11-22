@@ -4,10 +4,13 @@
 add_library(node_support INTERFACE)
 target_include_directories(node_support INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# domain：値・機器の契約・リース・重複排除・ポンプのインターロック
+# domain：値・機器の契約・リース・重複排除・インターロック・ルール
 add_library(node_domain STATIC
   domain/cmd_dedup_cache.cpp
-  domain/pump_interlock.cpp)
+  domain/reading_store.cpp
+  domain/pump_interlock.cpp
+  domain/fan_temp_interlock.cpp
+  domain/sensor_fault_interlock.cpp)
 target_link_libraries(node_domain PUBLIC node_support)
 node_product_target(node_domain)
 
@@ -30,6 +33,10 @@ add_library(node_app STATIC
   app/state_service.cpp
   app/telemetry_service.cpp
   app/command_service.cpp
+  app/mode_manager.cpp
+  app/manual_control.cpp
+  app/rule_engine.cpp
+  app/sensor_poller.cpp
   app/node.cpp)
 target_link_libraries(node_app PUBLIC node_domain node_infra)
 node_product_target(node_app)
@@ -55,6 +62,6 @@ add_library(node_platform_host STATIC
 target_link_libraries(node_platform_host PUBLIC node_infra PRIVATE paho_async)
 node_product_target(node_platform_host)
 
-add_executable(mcu_cpp_01 platform/host/main.cpp)
+add_executable(mcu_cpp_01 platform/host/main.cpp platform/host/debug_inputs.cpp)
 target_link_libraries(mcu_cpp_01 PRIVATE node_app node_config node_platform_host)
 node_product_target(mcu_cpp_01)

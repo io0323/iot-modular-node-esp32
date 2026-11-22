@@ -39,4 +39,11 @@ PumpInterlock::Output PumpInterlock::update(Level requested, std::uint64_t now_m
   return out;
 }
 
+InterlockVerdict PumpInterlock::evaluate(const InterlockInput& in) {
+  const Output out = update(in.requested, in.now_ms);
+  InterlockVerdict v{};
+  if (active_ || out.level < in.requested) v.upper = out.level;
+  return v;
+}
+
 }  // namespace node::domain
