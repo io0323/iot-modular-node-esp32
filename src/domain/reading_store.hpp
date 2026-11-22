@@ -41,6 +41,9 @@ class ReadingStore {
   /// @param now_ms いまの時刻（単調時計の ms）
   [[nodiscard]] Quality quality(std::string_view channel, std::uint64_t now_ms) const;
 
+  /// @brief 最後に good で読めた値（1/1000 単位）。一度も読めていなければ 0（故障中の telemetry の value。P3 の決定 #52）。
+  [[nodiscard]] std::int32_t last_good_value(std::string_view channel) const;
+
   /// @brief good と判定できるなら値（1/1000 単位）を返す。ルールとインターロックの入力に使う。
   [[nodiscard]] std::optional<std::int32_t> good_value(std::string_view channel, std::uint64_t now_ms) const;
 
@@ -50,6 +53,7 @@ class ReadingStore {
     bool has_reading{false};
     bool has_good{false};
     std::uint64_t last_good_ms{0};
+    std::int32_t last_good_value{0};
     std::uint32_t period_ms{1000};
   };
   Entry* find(std::string_view channel);

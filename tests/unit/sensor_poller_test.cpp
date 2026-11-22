@@ -56,9 +56,58 @@ TEST_F(SensorPollerTest, FailureMarksFaultAndEmitsOnePerChannel) {
   EXPECT_TRUE(r.changes[0].fault);
   EXPECT_EQ(store.quality("temp_air", 2000), Quality::Fault);
   EXPECT_EQ(store.quality("lux", 2000), Quality::Good);
-  EXPECT_EQ(poller.read_errors(), 1U);
+  EXPECT_EQ(poller.read_errors(), 3U);  // その場で続けて2回読み直す（#55）
   poller.tick(4000, r);
   EXPECT_TRUE(r.changes.empty());  // 遷移1回につき1件
+}
+
+TEST_F(SensorPollerTest, ThreeConsecutiveFailuresRequestRecoveryOnce) {
+  poller.tick(0, r);
+  bme.set_fault(true);
+  poller.tick(2000, r);
+  EXPECT_EQ(bme.recovery_requests(), 1U);
+  EXPECT_EQ(poller.recoveries(), 1U);
+  poller.tick(2000 + 30'000, r);  // 30秒ごとの再初期化では回復を要求しない
+  poller.tick(2000 + 60'000, r);
+  EXPECT_EQ(bme.recovery_requests(), 1U);
+}
+
+TEST_F(SensorPollerTest, RetrySucceedsWithoutFault) {
+  poller.tick(0, r);
+  bme.fail_next_reads(2);  // 2回失敗して3回目で読める
+  poller.tick(2000, r);
+  EXPECT_TRUE(r.changes.empty());
+  EXPECT_EQ(bme.recovery_requests(), 0U);
+  EXPECT_EQ(store.quality("temp_air", 2000), Quality::Good);
+}
+
+TEST_F(SensorPollerTest, FaultedChannelsStayInReadingsAsFaultWithLastGoodValue) {
+  poller.tick(0, r);
+  bme.set_value(0, 31000);  // 読めない間は使われない値
+  bme.set_fault(true);
+  poller.tick(2000, r);
+  ASSERT_EQ(r.readings.size(), 4U);  // 故障した回も周期が来たチャネルは入れる（#52）。BME280 の3つと lux
+  EXPECT_EQ(r.readings[0].channel, "temp_air");
+  EXPECT_EQ(r.readings[0].quality, Quality::Fault);
+  EXPECT_EQ(r.readings[0].value_milli, 25000);  // 最後に good で読めた値
+  poller.tick(3000, r);
+  ASSERT_EQ(r.readings.size(), 1U);  // lux だけ
+  poller.tick(4000, r);
+  EXPECT_EQ(r.readings.size(), 4U);  // 故障中も周期ごとに fault で入る
+  EXPECT_EQ(r.readings[0].quality, Quality::Fault);
+}
+
+TEST_F(SensorPollerTest, NeverReadChannelReportsZeroWhenFaulted) {
+  domain::ReadingStore fresh;
+  SensorPoller p{sensors, fresh};
+  p.start(0);
+  bme.set_fault(true);
+  p.tick(0, r);
+  ASSERT_EQ(r.readings.size(), 4U);
+  EXPECT_EQ(r.readings[0].value_milli, 0);  // 一度も読めていなければ 0
+  EXPECT_EQ(r.readings[0].quality, Quality::Fault);
+  EXPECT_EQ(r.readings[3].channel, "lux");
+  EXPECT_EQ(r.readings[3].quality, Quality::Good);
 }
 
 TEST_F(SensorPollerTest, ReinitEvery30sAndRecovers) {

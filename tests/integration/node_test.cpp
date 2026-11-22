@@ -361,6 +361,17 @@ TEST_F(NodeTest, Scenario3_DrySoilPulsesPumpThenSensorFaultMakesPumpUnsafe) {
   ASSERT_EQ(faults.size(), 1U);
   EXPECT_EQ(json_value(faults[0].payload, "channel"), "soil");
   EXPECT_EQ(json_value(faults[0].payload, "severity"), "critical");
+  // 故障中も telemetry は出続け、そのチャネルは fault（値は最後に good で読めた値。#52）
+  const std::string tel_at_fault = last_telemetry();
+  EXPECT_NE(tel_at_fault.find(R"({"channel":"soil","value":25.0,"unit":"pct","quality":"fault"})"), std::string::npos);
+  const auto tel_count = link.on("telemetry").size();
+  ASSERT_TRUE(run_until([&] { return link.on("telemetry").size() > tel_count + 10; }, 12'000));
+  bool soil_fault_again = false;
+  for (std::size_t i = tel_count; i < link.on("telemetry").size(); ++i) {
+    soil_fault_again |= link.on("telemetry")[i].payload.find(R"("channel":"soil","value":25.0,"unit":"pct","quality":"fault")") !=
+                        std::string::npos;
+  }
+  EXPECT_TRUE(soil_fault_again);  // 周期（10秒）ごとに fault で入る
   send(make_cmd(ulid(21), "set_actuator", R"({"id":"pump","level":1000})", "auto", R"("lease_s":10)"));
   run_for(10);
   EXPECT_EQ(json_value(last_ack(), "status"), "rejected");
@@ -398,6 +409,21 @@ TEST_F(NodeTest, Scenario4_ManualThenUpperCommandThenLeaseExpiryThenTimeout) {
   run_for(10);
   EXPECT_EQ(fan.current(), 0);  // 手動の設定は消える
   EXPECT_EQ(node->set_manual("fan_main", 500), ManualControl::Outcome::NotManualMode);
+}
+
+TEST_F(NodeTest, AllSensorsFaultedStillSendTelemetryWithActuators) {
+  run_for(100);
+  bme.set_fault(true);
+  lux.set_fault(true);
+  soil.set_fault(true);
+  run_for(10'000);
+  const auto before = link.on("telemetry").size();
+  run_for(5'000);
+  ASSERT_GE(link.on("telemetry").size() - before, 5U);  // lux の周期（1秒）ごとに出る
+  const std::string tel = last_telemetry();
+  EXPECT_NE(tel.find(R"("channel":"lux","value":300.0,"unit":"lux","quality":"fault")"), std::string::npos);
+  EXPECT_TRUE(actuator_in(tel, "fan_main").has_value());
+  EXPECT_EQ(actuator_in(tel, "fan_main")->second, "interlock");  // 気温が読めないのでファンは1000（#22）
 }
 
 TEST_F(NodeTest, ButtonCyclesModesAndRepublishesStateEachTime) {

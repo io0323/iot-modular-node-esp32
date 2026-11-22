@@ -28,6 +28,8 @@ class ISensor {
   [[nodiscard]] virtual std::chrono::milliseconds period() const = 0;
   /// @brief この機器が持つチャネル。
   [[nodiscard]] virtual std::span<const ChannelSpec> channels() const = 0;
+  /// @brief 続けて読めなかったときの回復を要求する（I2C の機器はバスの回復。P3 の決定 #48、#55）。既定は何もしない。
+  virtual support::Result<void> request_recovery() { return support::ok(); }
 };
 
 /// @brief アクチュエーターの共通の契約（基本設計書 第5章）。
