@@ -119,12 +119,26 @@ Level ControlArbiter::apply_interlocks(Slot& s, Level pre, std::uint64_t now_ms,
   return out;
 }
 
+Level ControlArbiter::hold_for_min_time(const Slot& s, Level wanted, std::uint64_t now_ms) {
+  // 0 と 0 より大きい値の切り替えだけを待たせる（オンの間の値の変更はすぐ反映。#59）
+  const domain::ActuatorSpec& spec = s.actuator->spec();
+  const bool is_on = s.output > 0;
+  const bool want_on = wanted > 0;
+  if (is_on == want_on) return wanted;
+  const std::optional<std::uint32_t> min = is_on ? spec.min_on_ms : spec.min_off_ms;
+  if (min && now_ms - s.switched_at_ms < *min) return s.output;
+  return wanted;
+}
+
 void ControlArbiter::evaluate(Slot& s, std::uint64_t now_ms, InterlockChanges& changes) {
   if (s.has_lease && s.lease.expired(now_ms)) s.has_lease = false;
   const StageResult pre = stages(s);
-  const Level out = apply_interlocks(s, pre.level, now_ms, changes);
-  s.owner = out != pre.level ? Owner::Interlock : pre.owner;
+  const Level guarded = apply_interlocks(s, pre.level, now_ms, changes);
+  // インターロックで値を変えたときは最小オン・オフ時間より優先する（#47）
+  const Level out = guarded != pre.level ? guarded : hold_for_min_time(s, guarded, now_ms);
+  s.owner = guarded != pre.level ? Owner::Interlock : pre.owner;
   if (out != s.output || out != s.actuator->current()) {
+    if ((out > 0) != (s.output > 0)) s.switched_at_ms = now_ms;
     if (!s.actuator->apply(out)) ++apply_errors_;
     s.output = out;
   }

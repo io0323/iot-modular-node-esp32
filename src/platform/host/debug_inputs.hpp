@@ -10,6 +10,18 @@
 
 namespace node::platform {
 
+/// @brief デバッグ入力の入れ先（模擬機器の構成と fakehw の構成で実装が違う）。
+class IDebugTarget {
+ public:
+  virtual ~IDebugTarget() = default;
+  /// @brief チャネルの値を変える（単位はそのチャネルの単位）。
+  /// @return そのチャネルを扱えなければ false
+  virtual bool set_value(std::string_view channel, double value) = 0;
+  /// @brief センサーを読めなくする・戻す。
+  /// @return そのセンサーを扱えなければ false
+  virtual bool set_fault(std::string_view sensor_id, bool fault) = 0;
+};
+
 /// @brief ホスト版のデバッグ入力（P2）。起動からの経過時間で、模擬センサーの値・故障、ボタン、手動の出力を入れる。
 ///
 /// - `--sim <channel>=<value>[@<秒>]`：模擬センサーの値を変える（秒を省けば起動時）
@@ -29,8 +41,9 @@ class DebugInputs {
   /// @brief 時刻が来た入力を当てる。
   /// @param elapsed_ms 起動からの経過時間
   /// @param node アプリ（ボタン・手動の出力）
+  /// @param target 値と故障の入れ先
   /// @param log ログ
-  void apply_due(std::uint64_t elapsed_ms, app::Node& node, infra::ILogSink& log);
+  void apply_due(std::uint64_t elapsed_ms, app::Node& node, IDebugTarget& target, infra::ILogSink& log);
 
   [[nodiscard]] bool empty() const { return actions_.empty(); }
 

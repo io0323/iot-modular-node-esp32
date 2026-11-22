@@ -15,6 +15,7 @@
 #include "app/sensor_poller.hpp"
 #include "app/state_service.hpp"
 #include "app/telemetry_service.hpp"
+#include "app/ui_service.hpp"
 #include "domain/device.hpp"
 #include "domain/reading_store.hpp"
 #include "infra/clock.hpp"
@@ -72,6 +73,8 @@ class Node {
     return discards_[static_cast<std::size_t>(r)];
   }
   [[nodiscard]] std::size_t pending_events() const { return events_.pending(); }
+  [[nodiscard]] const UiService& ui() const { return ui_; }
+  [[nodiscard]] const ManualControl& manual() const { return manual_; }
 
  private:
   enum class LinkState : std::uint8_t { Disconnected, Connecting, Connected };
@@ -110,6 +113,7 @@ class Node {
   EventService events_{};
   StateService state_;
   TelemetryService telemetry_;
+  UiService ui_;
 
   LinkState link_state_{LinkState::Disconnected};
   std::uint64_t next_connect_ms_{0};

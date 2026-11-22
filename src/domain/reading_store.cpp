@@ -39,6 +39,7 @@ bool ReadingStore::update(const Reading& r, std::uint64_t now_ms) {
   if (r.quality == Quality::Good) {
     e->has_good = true;
     e->last_good_ms = now_ms;
+    e->last_good_value = r.value_milli;
   }
   return true;
 }
@@ -64,6 +65,11 @@ Quality ReadingStore::quality(std::string_view channel, std::uint64_t now_ms) co
   if (e->reading.quality == Quality::Stale) return Quality::Stale;
   const std::uint64_t limit = static_cast<std::uint64_t>(e->period_ms) * kStaleFactor;
   return (now_ms - e->last_good_ms > limit) ? Quality::Stale : Quality::Good;
+}
+
+std::int32_t ReadingStore::last_good_value(std::string_view channel) const {
+  const Entry* e = find(channel);
+  return (e != nullptr && e->has_good) ? e->last_good_value : 0;
 }
 
 std::optional<std::int32_t> ReadingStore::good_value(std::string_view channel, std::uint64_t now_ms) const {

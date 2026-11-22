@@ -5,8 +5,9 @@
 種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
 機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P2）**：PC で動くホスト版です。模擬のセンサー・アクチュエーターで動き、MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
-制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）まであります。
+**いまの段階（P3）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
+制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
+機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
 ESP-IDF のターゲット版・実機のドライバ・エミュレーターはまだありません（下の「フェーズ」）。**実機では確かめていません。**
 
 ## 対応する共通仕様
@@ -48,8 +49,10 @@ IOTSPEC_MQTT_PASSWORD=iotspec-dev \
 ## 動かし方（ホスト版）
 
 ```sh
-./build/host/mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>]
+./build/host/mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>] [--devices sim|fakehw]
 ```
+
+`--devices` は機器の構成です。`sim`（既定）は P2 の模擬機器、`fakehw` は実機用のドライバをフェイクの I2C バス・ADC・PWM・GPIO・機器（BME280・BH1750・SSD1306）につないだ構成です。契約テストは両方の構成で流しています。
 
 | 設定 | 既定 |
 |---|---|
@@ -66,7 +69,7 @@ SIGTERM・SIGINT では offline の state を送ってから切断します。�
 | 引数 | 動き |
 |---|---|
 | `--sim <channel>=<value>[@<秒>]` | 起動から指定秒後に模擬センサーの値を変える（複数指定可） |
-| `--sim-fault <センサーID>@<開始秒>[-<終了秒>]` | 模擬センサーを読めなくする（センサー ID は `bme280`・`bh1750`・`soil_moisture`） |
+| `--sim-fault <センサーID>@<開始秒>[-<終了秒>]` | 模擬センサーを読めなくする（センサー ID は `bme280`・`bh1750`・`soil_moisture`。fakehw では I2C のタイムアウトか ADC の故障） |
 | `--press-at <秒>` | ボタンの短押しを1回入れる（自動 → 手動 → 省電力 → 自動） |
 | `--manual <id>=<level>@<秒>` | 手動の出力を入れる（手動モードでなければ無視してログに残す） |
 
@@ -93,16 +96,31 @@ SIGTERM・SIGINT では offline の state を送ってから切断します。�
 | `cool-on-high-temp` | temp_air | 30.0℃以上／28.0℃未満 | fan_main 600 |
 | `water-on-dry` | soil | 30.0% 未満 | pump 1000 を5秒（クールダウン10分） |
 
+## 機器のドライバとデータシート
+
+| ドライバ | 機器 | 出典（コメントに節・表・ページを書いている） |
+|---|---|---|
+| `Bme280` | Bosch BME280（温度・湿度・気圧、I2C） | BME280 Data sheet BST-BME280-DS001-24 rev 1.24（Feb 2024）。補正式の照合は BMP280 Data sheet BST-BMP280-DS001-26 rev 1.26（Oct 2021）3.12 節 |
+| `Bh1750` | ROHM BH1750FVI（照度、I2C） | BH1750FVI Technical Note 2011.11 Rev.D |
+| `Ssd1306` | Solomon Systech SSD1306（128×64 OLED、I2C） | SSD1306 Rev 1.1（Apr 2008）、SSD1306 Application Note Rev 0.4（Jan 2009） |
+| `SoilMoisture` | 静電容量式の土壌水分センサー（ADC） | データシートなし。乾 3000＝0%・湿 1300＝100% の直線（**仮の校正値**。実機フェーズで校正） |
+| `PwmActuator`・`RelayActuator`・`Button` | ファン・LED・ブザー（PWM）、ポンプ（リレー）、タクトスイッチ×2 | データシートなし。値の決まりは open-questions #41〜#47・#58 |
+
+ボタンは2つです。MODE の短押しでモードを切り替えます（自動 → 手動 → 省電力 → 自動）。ACTION は手動モードでだけ働き、短押しで操作する機器を選び（fan_main → led_grow → pump → buzzer）、長押しでその機器を 0 と 1000 で切り替えます。
+
 ## 構成
 
 ```
 src/
   support/        Result・Error・固定容量コンテナ（自作 Error Framework の仮の代わり）
-  domain/         値・機器の契約（ISensor・IActuator・IInterlock）・リース・重複排除・インターロック3種・ルール・計測値と品質
-  app/            ControlArbiter・ModeManager・ManualControl・RuleEngine・SensorPoller・CommandService・Telemetry・State・Event・Node
+  hal/            ハードのインターフェースだけ（I2C・ADC・PWM・GPIO・ミューテックス・タイマー。自作 iot-hal に置き換える前提）
+  domain/         値・機器の契約（ISensor・IActuator・IInterlock・IButton・IDisplay）・リース・重複排除・インターロック3種・ルール・計測値と品質
+  app/            ControlArbiter・ModeManager・ManualControl・RuleEngine・SensorPoller・UiService・CommandService・Telemetry・State・Event・Node
   infra/          IMqttLink・IClock・IRandom・JsonWriter・CmdParser・エンベロープ・トピック・送信量の制限
+  drivers/        機器のドライバ（データシートどおり）
+  drivers/fake/   hal と機器のフェイク（テストと --devices fakehw）
   drivers/sim/    ホスト用の模擬センサー・模擬アクチュエーター
-  config/         構成表（devices.cpp）
+  config/         構成表（devices.cpp：模擬機器、fakehw.cpp：ドライバとフェイク）
   platform/host/  Paho・時計・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
 tests/unit/  tests/integration/
 ```
@@ -112,12 +130,12 @@ tests/unit/  tests/integration/
 | フェーズ | 内容 | 状態 |
 |---|---|---|
 | P1 | ホスト版の骨組み、MQTT 接続、cmd の受け付け、CI での契約テスト | 完了（PR #1） |
-| P2 | ControlArbiter の5段の優先度、ModeManager、RuleEngine、インターロックの残り | 進行中 |
-| P3 | 機器ドライバと I2C フェイク、DeviceRegistry と構成表 | — |
+| P2 | ControlArbiter の5段の優先度、ModeManager、RuleEngine、インターロックの残り | 完了（PR #2） |
+| P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 進行中 |
 | P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | — |
 | P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | — |
 | P6 | ESP-IDF ターゲット版 | — |
 | P7 | エミュレーター（QEMU・Wokwi） | — |
 | P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)）、[未決の論点](docs/open-questions.md)。
+書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)）、[未決の論点](docs/open-questions.md)。

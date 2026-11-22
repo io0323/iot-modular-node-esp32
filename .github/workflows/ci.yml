@@ -56,8 +56,12 @@ jobs:
           uv tool install "iotspec @ git+https://github.com/io0323/iot-common-spec@v0.2.1"
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
-      - name: 契約テスト（--role mcu-cpp-01）
+      - name: 契約テスト（--role mcu-cpp-01、既定の模擬機器）
         run: iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host/mcu_cpp_01 --log contract-log.jsonl" --junit contract.xml
+
+      - name: 契約テスト（--role mcu-cpp-01、--devices fakehw：ドライバとフェイクの機器）
+        if: always()
+        run: iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host/mcu_cpp_01 --devices fakehw --log contract-fakehw-log.jsonl" --junit contract-fakehw.xml
 
       - name: ASan・UBSan の指摘がないこと
         if: always()
@@ -76,6 +80,8 @@ jobs:
           path: |
             contract.xml
             contract-log.jsonl
+            contract-fakehw.xml
+            contract-fakehw-log.jsonl
             mosquitto.log
             sanitizer/
           if-no-files-found: warn

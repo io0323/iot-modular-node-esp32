@@ -21,7 +21,8 @@ Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMq
       poller_(registry.sensors(), store_),
       commands_(arbiter_, modes_),
       state_(registry.sensors(), arbiter_, config.fw_version),
-      telemetry_(arbiter_) {
+      telemetry_(arbiter_),
+      ui_(registry.ui(), modes_, manual_, arbiter_, store_) {
   apply_mode_state();
 }
 
@@ -33,6 +34,7 @@ support::Result<void> Node::start() {
   for (const domain::ActuatorBinding& b : registry_.actuators()) {
     if (auto r = b.actuator->init(); !r) return r;
   }
+  if (auto r = ui_.init(); !r) return r;
   const std::uint64_t now = clock_.monotonic_ms();
   poller_.start(now);
   next_connect_ms_ = now;
@@ -67,6 +69,7 @@ void Node::tick() {
   post_sensor_events(poll_);
 
   if (const auto change = modes_.tick(now)) on_mode_change(*change);
+  if (ui_.tick(now, link_state_ == LinkState::Connected).mode_pressed) press_button();
   handle_inbound(now);
   run_rules(now);
 
@@ -278,6 +281,8 @@ void Node::log_diag() {
   w.end_object();
   w.key("rx_wrong_topic").uinteger(wrong_topic_);
   w.key("read_errors").uinteger(poller_.read_errors());
+  w.key("sensor_recoveries").uinteger(poller_.recoveries());
+  w.key("display_errors").uinteger(ui_.display_errors());
   w.key("apply_errors").uinteger(arbiter_.apply_errors());
   w.key("inflight").uinteger(link_.inflight());
   w.end_object();

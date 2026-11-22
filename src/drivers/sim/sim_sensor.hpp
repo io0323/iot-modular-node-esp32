@@ -41,6 +41,14 @@ class SimSensor final : public domain::ISensor {
   void set_fault(bool fault) { fault_ = fault; }
   /// @brief init を呼んだ回数（再初期化のテスト用）。
   [[nodiscard]] std::uint32_t init_count() const { return init_count_; }
+  /// @brief 次の n 回の read を失敗させる（読み直しのテスト用）。
+  void fail_next_reads(std::uint32_t n) { fail_next_reads_ = n; }
+  /// @brief 回復の要求を数える。
+  support::Result<void> request_recovery() override {
+    ++recovery_requests_;
+    return support::ok();
+  }
+  [[nodiscard]] std::uint32_t recovery_requests() const { return recovery_requests_; }
 
  private:
   std::string_view id_;
@@ -50,6 +58,8 @@ class SimSensor final : public domain::ISensor {
   domain::Quality quality_{domain::Quality::Good};
   bool fault_{false};
   std::uint32_t init_count_{0};
+  std::uint32_t fail_next_reads_{0};
+  std::uint32_t recovery_requests_{0};
 };
 
 /// @brief ホスト用の模擬アクチュエーター。受けた level を覚えて返すだけ。

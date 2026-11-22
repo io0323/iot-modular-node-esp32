@@ -19,6 +19,10 @@ support::Result<void> SimSensor::init() {
 
 support::Result<std::size_t> SimSensor::read(std::span<domain::Reading> out) {
   if (fault_) return support::make_error(support::ErrorCode::IoError, "sim sensor fault");
+  if (fail_next_reads_ > 0) {
+    --fail_next_reads_;
+    return support::make_error(support::ErrorCode::IoError, "sim sensor transient fault");
+  }
   if (out.size() < channels_.size()) {
     return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");
   }
