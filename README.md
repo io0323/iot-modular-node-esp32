@@ -2,24 +2,84 @@
 
 [![ci](https://github.com/io0323/iot-modular-node-esp32/actions/workflows/ci.yml/badge.svg)](https://github.com/io0323/iot-modular-node-esp32/actions/workflows/ci.yml)
 
-種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
-機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
+種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20・ESP-IDF v5.5.6・FreeRTOS。作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P7）**：PC で動くホスト版と、ESP32-S3 向けのターゲット版（ESP-IDF v5.5.6）です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
-制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
-機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
-通信は「ネットワーク → 時刻の同期 → MQTT」の順に接続し、切れたら 1・2・4…60 秒の間隔でつなぎ直します。送れない間のイベントは32件まで保持し、
-確認の取れなかった event は同じ電文のまま送り直し、つなぎ直したら UPSTREAM_LOST・UPSTREAM_RESTORED で切れていた間を知らせます。
-ターゲット版は FreeRTOS の4つのタスク（control・sense・comm・ui）に分け、アプリのロジックは control のタスクだけで動かします。
-ターゲット版は、エミュレーター（QEMU・Wokwi）で動かして確かめています（QEMU ではファームウェアに契約テストも流す）。**実機では確かめていません。**
+## 要点
 
-**基本設計書との差（P6）**：省電力モードのライトスリープは入れていません（消費電流を測れず確かめられないため。計測周期の5倍と表示の消灯だけ。実機フェーズで入れる。open-questions #107）。
-ルールのしきい値と周期の NVS への保存（FR-12）も入れていません（#108）。
+- **何をするか**：温度・湿度・気圧・照度・土壌水分を周期で計測し、ファン・育成灯・ポンプ・ブザーを動かします。動かし方は次の4つです
+  - ローカルルール（自動モード）
+  - 本体のボタン（手動モード）
+  - 作品03からの指令（リース付き）
+  - 安全インターロック（どの経路より優先）
+
+  出力を決めるのは `ControlArbiter` の1か所だけです。計測値・イベント・状態は、共通仕様（iot-common-spec v0.2.1）の電文で MQTT に送ります
+- **主題：機器の追加は「新しいクラス＋構成表1行」**：センサーとアクチュエーターは `ISensor`・`IActuator` だけで扱い、app は具体的な機器を知りません
+  - SHT31（温湿度）を実際に足した PR では、既存のファイルの変更が「追加1行×7」でした。内訳は、構成表の行と include、ビルド定義です
+  - ただしそうなったのは P8 で構成表を「1行が1台」の表に直した後で、P3〜P7 の構成表では満たしていませんでした（[拡張性の実証](#拡張性の実証p8asht31-の追加)）
+- **検証の範囲**：実機を使わずに確かめています
+  - 単体テストとホスト結合テスト（236件）
+  - 共通仕様の契約テスト（ホスト版と QEMU のファームウェア）
+  - ブローカーの停止・再開の試験
+  - 品質の検査（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer）
+  - QEMU と Wokwi でのターゲット版の実行
+
+  **実機では確かめていません**（[実機フェーズで確かめること](#実機フェーズで確かめること)）
+
+```mermaid
+flowchart LR
+  subgraph node["mcu-cpp-01（ESP32-S3）"]
+    sense["sense タスク<br/>センサーの読み取り"]
+    control["control タスク<br/>Node：調停・ルール・モード・cmd"]
+    comm["comm タスク<br/>esp-mqtt"]
+    ui["ui タスク<br/>ボタン・OLED"]
+    sense -- 計測の結果 --> control
+    control -- 計測の依頼 --> sense
+    ui -- ボタン --> control
+    control -- 表示 --> ui
+    control -- 送信の依頼 --> comm
+    comm -- 受信した cmd --> control
+  end
+  sensors["BME280・BH1750・SHT31・土壌水分"] --> sense
+  control --> actuators["ファン・育成灯・ポンプ・ブザー"]
+  comm <-- "MQTT（telemetry・event・state・cmd・cmd/ack）" --> broker["Mosquitto（作品03の Raspberry Pi）"]
+  broker <--> upper["作品03"]
+```
+
+### 数値（P8 の完了時）
+
+| 項目 | 値 |
+|---|---|
+| テスト | CTest 236件（host-debug・host-release・host-tsan とも合格）、契約テスト 9/9（ホスト版の既定・fakehw・TSan、QEMU のファームウェア） |
+| カバレッジ（行） | domain 92.5%・app 96.1%（合格条件 80% 以上）、infra 96.2%・drivers 90.2% |
+| 静的な検査 | clang-tidy 0・cppcheck 0・Doxygen の警告 0・循環的複雑度の最大 10 |
+| ターゲット版の RAM | 静的な DIRAM 231,479／341,760 バイト（67.7%。P6 は 88.8%） |
+| ヒープの最低残量 | Wi-Fi に接続した後 144,432 バイト（Wokwi）。QEMU で30分、5分後から下がらない（210,592 バイト） |
+| 再接続 | ブローカーが戻ってから MQTT の再接続まで 10.2〜10.6 秒（broker_restart.py。要件は60秒以内） |
+| スタックの残り | 最小で ui 41%（QEMU・Wokwi。基準 25% 以上） |
+
+### 書類
+
+| 書類 | 中身 |
+|---|---|
+| [要件定義・基本設計書](docs/design/01-requirements-basic-design.md) | 要件（FR・NFR）と基本設計（Claude Docs からの写し） |
+| [詳細設計書](docs/design/02-detailed-design.md) | 層・クラス・処理の流れ・状態遷移・タスク・容量・構成表・異常系・基本設計書との差 |
+| [テスト仕様書](docs/test-spec.md) | 要件ごとのテストと結果、受け入れ基準（MVP）の結論 |
+| [ADR](docs/adr/README.md) | 設計の決定の記録（0001〜0006） |
+| [品質ゲート](docs/quality.md) | 検査の一覧・抑止・エミュレーター・RAM・いまの数値 |
+| [未決の論点](docs/open-questions.md) | 判断した論点と決定（P8 の完了時に「未決」「仮実装」は0件） |
+| [Claude Code のプロンプト](docs/prompts/README.md) | フェーズ P1〜P8 の一覧とプロンプト |
 
 ## 対応する共通仕様
 
 [iot-common-spec](https://github.com/io0323/iot-common-spec) **v0.2.1**（`external/iot-common-spec` に submodule で固定）。
 P1 の時点で v0.2.2 のタグはまだないため v0.2.1 に固定しています（[docs/open-questions.md](docs/open-questions.md) #12）。
+作品02は v0.2.1 で完成としています（#12。申し送り）。v0.2.2 のタグができたら、次の手順で上げます。
+
+1. `git -C external/iot-common-spec fetch --tags && git -C external/iot-common-spec checkout v0.2.2` で submodule を上げ、`git add external/iot-common-spec` でコミットする
+2. 契約テストキットの版を上げる：`.github/workflows/ci.yml` の `iotspec @ git+https://github.com/io0323/iot-common-spec@v0.2.1`（2か所）と `tools/qemu.sh` の同じ指定を `@v0.2.2` にする。手元は `uv tool install --force "iotspec @ git+https://github.com/io0323/iot-common-spec@v0.2.2"`
+3. v0.2.2 の変更点（`docs/spec.md` の改訂履歴・`schemas/`・`profiles/mcu-cpp-01.yaml`）を読み、作品02に要る変更を `docs/open-questions.md` に書き出す
+4. `tests/unit/spec_samples_test.cpp`（samples の受け付け・破棄）、契約テスト（既定・fakehw・QEMU）、broker_restart.py を流す
+5. README の「対応する共通仕様」と「依存」の版を直す
 
 ## 依存（すべて版を固定）
 
@@ -92,7 +152,7 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 - 接続の情報は Kconfig の `NODE_WIFI_SSID`・`NODE_WIFI_PASSWORD`・`NODE_MQTT_URL`・`NODE_MQTT_PASSWORD`・`NODE_SITE`（既定は空）。`firmware/sdkconfig.defaults.local` があれば `sdkconfig.defaults` に重ねる（#102）
 - SNTP の1つ目は MQTT のブローカーと同じホスト、2つ目は `pool.ntp.org`（`NODE_SNTP_SERVER1`・`2` で変えられる。#103）
 - ピンの割り当て（仮、ESP32-S3-DevKitC-1）：I2C0 SDA GPIO8・SCL GPIO9、土壌水分 GPIO1（ADC1）、fan_main GPIO4・led_grow GPIO5・buzzer GPIO6（LEDC）、ポンプのリレー GPIO7、MODE ボタン GPIO10・ACTION ボタン GPIO11（`src/config/esp32_pins.hpp`。#105）
-- イメージの大きさ（P7）：全体 1,011,025 バイト、DIRAM 67.7%（P6 は 88.8%。持ち方だけを変えて減らした。[docs/quality.md](docs/quality.md)）
+- イメージの大きさ（P8）：全体 1,012,573 バイト、DIRAM 67.7%（P6 は 88.8%。P7 で持ち方だけを変えて減らした。[docs/quality.md](docs/quality.md)）
 
 | タスク | 優先度 | コア | 周期 | 呼ぶもの |
 |---|---|---|---|---|
@@ -268,6 +328,30 @@ tests/unit/  tests/integration/  tests/system/（broker_restart.py）
 tools/          品質のイメージ（docker/quality.Dockerfile）・quality.sh・TSan の抑止（tsan.supp）
 ```
 
+## 実機フェーズで確かめること
+
+開発段階では実機を使っていません。次のことは、実機フェーズで確かめます（[テスト仕様書](docs/test-spec.md)）。
+
+- ドライバと実際の機器の差：BME280・BH1750・SHT31・SSD1306。土壌水分の校正値（仮の 3000／1300。#43）、I2C のプルアップ（#113）
+- PWM（LEDC）の波形・リレー・ブザーの実際の動き。ピンの割り当て（仮。#105）
+- OLED の表示の向き（データシートのリセット値のまま。Wokwi では180度回る。#56・#134）
+- NFR-02 の実測（cmd を受けてから出力まで 100ms、ack まで 200ms）
+- NFR-03 の24時間（ヒープの最低残量が下がり続けない）と、Wi-Fi と MQTT が同時に動いた状態のヒープ
+- NFR-08 の Wi-Fi の AP の停止と復旧（60秒以内の再接続）
+- スタックの残りの見直し。I2C のバスの回復、Wi-Fi・MQTT の再接続の直後の一括の送信を通した後の値（#137）
+- power_on と watchdog 以外のリセット要因（brownout など）の実際の発生
+- ポンプが動き続ける最長（30秒＋タスクウォッチドッグの5秒。ADR 0005）
+- 省電力モードのライトスリープと消費電流（入れていない。#107）。FR-12（NVS への保存）は本版では扱わない（#108・#144）
+
+## この後の作業（申し送り）
+
+- **共通仕様**：v0.2.2 のタグができたら上げる（上の「対応する共通仕様」の手順。#12）。次の2つは、共通仕様の変更案として io に渡す
+  - ESP_RST_PANIC の扱い（#7）
+  - プロファイルへの SHT31 の2チャネルの追加（#142）
+- **作品03**：SNTP の1つ目のサーバーを MQTT のブローカーと同じホストにしている（#11・#111）
+- **CI**：NFR-03 の「自分のコードがヒープを確保しない」の grep は、PR ごとに手で流している。CI の手順に足すとよい（テスト仕様書の受け入れ基準の3つ目）
+- **模擬機器の構成表**：`config/devices.cpp` の `SimRig` は表にしていない（#147）。模擬機器を足すことがあれば、実機用と同じ表にする
+
 ## フェーズ
 
 | フェーズ | 内容 | 状態 |
@@ -278,7 +362,7 @@ tools/          品質のイメージ（docker/quality.Dockerfile）・quality.s
 | P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 完了（PR #4） |
 | P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | 完了（PR #5） |
 | P6 | ESP-IDF ターゲット版 | 完了（PR #6） |
-| P7 | RAM の見直しとエミュレーター（QEMU・Wokwi） | 進行中 |
-| P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
+| P7 | RAM の見直しとエミュレーター（QEMU・Wokwi） | 完了（PR #7） |
+| P8 | 構成表のリファクタリング、拡張性の実証（SHT31）、書類の仕上げ | 完了（PR #8・#9・P8b の PR） |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)・[P6](docs/prompts/P6-prompt.md)・[P7](docs/prompts/P7-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。
+フェーズごとの目的と結果は [docs/prompts/README.md](docs/prompts/README.md) にあります。
