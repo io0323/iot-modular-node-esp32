@@ -5,13 +5,13 @@
 種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
 機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P6）**：PC で動くホスト版と、ESP32-S3 向けのターゲット版（ESP-IDF v5.5.6。ビルドまで）です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
+**いまの段階（P7）**：PC で動くホスト版と、ESP32-S3 向けのターゲット版（ESP-IDF v5.5.6）です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
 制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
 機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
 通信は「ネットワーク → 時刻の同期 → MQTT」の順に接続し、切れたら 1・2・4…60 秒の間隔でつなぎ直します。送れない間のイベントは32件まで保持し、
 確認の取れなかった event は同じ電文のまま送り直し、つなぎ直したら UPSTREAM_LOST・UPSTREAM_RESTORED で切れていた間を知らせます。
 ターゲット版は FreeRTOS の4つのタスク（control・sense・comm・ui）に分け、アプリのロジックは control のタスクだけで動かします。
-エミュレーターでの実行はまだありません（P7）。**実機では確かめていません。**
+ターゲット版は、エミュレーター（QEMU・Wokwi）で動かして確かめています（QEMU ではファームウェアに契約テストも流す）。**実機では確かめていません。**
 
 **基本設計書との差（P6）**：省電力モードのライトスリープは入れていません（消費電流を測れず確かめられないため。計測周期の5倍と表示の消灯だけ。実機フェーズで入れる。open-questions #107）。
 ルールのしきい値と周期の NVS への保存（FR-12）も入れていません（#108）。
@@ -92,7 +92,7 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 - 接続の情報は Kconfig の `NODE_WIFI_SSID`・`NODE_WIFI_PASSWORD`・`NODE_MQTT_URL`・`NODE_MQTT_PASSWORD`・`NODE_SITE`（既定は空）。`firmware/sdkconfig.defaults.local` があれば `sdkconfig.defaults` に重ねる（#102）
 - SNTP の1つ目は MQTT のブローカーと同じホスト、2つ目は `pool.ntp.org`（`NODE_SNTP_SERVER1`・`2` で変えられる。#103）
 - ピンの割り当て（仮、ESP32-S3-DevKitC-1）：I2C0 SDA GPIO8・SCL GPIO9、土壌水分 GPIO1（ADC1）、fan_main GPIO4・led_grow GPIO5・buzzer GPIO6（LEDC）、ポンプのリレー GPIO7、MODE ボタン GPIO10・ACTION ボタン GPIO11（`src/config/esp32_pins.hpp`。#105）
-- イメージの大きさ（P6）：全体 1,010,381 バイト、DIRAM 88.8%（[docs/quality.md](docs/quality.md)）
+- イメージの大きさ（P7）：全体 1,010,777 バイト、DIRAM 67.7%（P6 は 88.8%。持ち方だけを変えて減らした。[docs/quality.md](docs/quality.md)）
 
 | タスク | 優先度 | コア | 周期 | 呼ぶもの |
 |---|---|---|---|---|
@@ -100,6 +100,22 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 | sense | 5 | 1 | 依頼を待つ | drivers::SensorIo（センサーの read・init・回復） |
 | comm | 4 | 0 | 依頼を待つ（20ms） | esp-mqtt の API |
 | ui | 3 | 1 | 20ms | drivers::UiIo（ボタン・OLED） |
+
+## エミュレーター（QEMU・Wokwi）
+
+ターゲット版のファームウェアを、実機の代わりにエミュレーターで動かします。手順・構成・確かめられないことの表・測った値は [docs/quality.md の「エミュレーター」](docs/quality.md) にあります。
+
+```sh
+tools/qemu.sh test        # QEMU：起動・4つのタスク・BOOT・stats（Docker の espressif/idf:v5.5.6）
+tools/qemu.sh contract    # QEMU：ファームウェアに契約テスト（Mosquitto を先に起動しておく）
+tools/qemu.sh soak 30     # QEMU：30分動かして、ヒープの最低残量が下がらないこと（NFR-03）
+tools/wokwi.sh            # Wokwi：起動と計測値・ボタンとモード・Wi-Fi とヒープ・タスクウォッチドッグ
+```
+
+- **QEMU**（ESP-IDF v5.5.6 同梱の qemu-xtensa）：Wi-Fi・I2C・ADC・LEDC は再現されない。ネットワークは仮想の Ethernet（OpenCores Ethernet）で、ホストの Mosquitto につないで契約テストを流す。I2C と ADC の機器は、試験用の構成でフェイクに替える。タスクウォッチドッグは働かないので、Wokwi で確かめる
+- **Wokwi**（wokwi-cli v0.29.1）：図は `wokwi/diagram.json`。BME280 と BH1750 は、データシートのレジスタだけを再現したカスタムチップ（`wokwi/chips/`）。Wi-Fi は Wokwi-GUEST。MQTT はつなげない（ローカルのブローカーにつなぐ Private Gateway は有料の機能。公開のブローカーは使わない）
+- Wokwi のトークンは、環境変数 `WOKWI_CLI_TOKEN` か `~/.config/wokwi/token`（1行、`chmod 600`）。CI ではシークレット `WOKWI_CLI_TOKEN` を使い、なければジョブを「省略」として通す
+- **Wokwi の無料枠**：CI はシミュレーションの時間で30日あたり50分、1回の実行は実際の経過時間で5分まで（docs.wokwi.com/wokwi-ci/getting-started）。4本で約133秒なので、30日におよそ22回流せる。そのため CI の Wokwi は、main への push で `firmware/`・`src/`・`wokwi/` が変わったときと、手動の実行（`gh workflow run wokwi.yml --ref <ブランチ>`）のときだけ動かす
 
 ## 動かし方（ホスト版）
 
@@ -197,8 +213,8 @@ tools/          品質のイメージ（docker/quality.Dockerfile）・quality.s
 | P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 完了（PR #3） |
 | P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 完了（PR #4） |
 | P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | 完了（PR #5） |
-| P6 | ESP-IDF ターゲット版 | 進行中 |
-| P7 | エミュレーター（QEMU・Wokwi） | — |
+| P6 | ESP-IDF ターゲット版 | 完了（PR #6） |
+| P7 | RAM の見直しとエミュレーター（QEMU・Wokwi） | 進行中 |
 | P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)・[P6](docs/prompts/P6-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。
+書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)・[P6](docs/prompts/P6-prompt.md)・[P7](docs/prompts/P7-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。

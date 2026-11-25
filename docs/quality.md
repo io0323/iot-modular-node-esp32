@@ -97,36 +97,135 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 
 ほかに、P1 からあるコンパイラの警告の抑止が 1 つあります：`src/platform/host/paho_mqtt_link.cpp` の `NODE_PAHO_INIT_BEGIN`／`END`（GCC の `-Wmissing-field-initializers` を、Paho の初期化マクロ `MQTTAsync_*_initializer` の間だけ外す。Paho のマクロが後ろの項目を省くため）。
 
-## いまの数値（P6 の完了時）
+## エミュレーター（P7）
 
-### カバレッジ（GCC 13.3、gcovr 7.0、CTest 219 件）
+ターゲット版のファームウェアを、QEMU と Wokwi で動かして確かめます。どちらも実機の代わりにはならないので、確かめられないことを下の表にまとめます。
+
+### 動かし方
+
+```sh
+# QEMU（Docker の espressif/idf:v5.5.6 の中で動かす。Mac と CI で同じ）
+tools/qemu.sh test                 # 構成 qemu：起動・4つのタスク・BOOT（power_on）・stats・スタックの残り
+docker compose -f external/iot-common-spec/docker-compose.yml up -d mosquitto
+tools/qemu.sh contract             # 構成 qemu-fakehw：ファームウェアに契約テスト（--role mcu-cpp-01、9件）
+tools/qemu.sh soak 30              # 構成 qemu-fakehw：Mosquitto につないで30分。NFR-03（5分後と終わりのヒープの最低残量）
+
+# Wokwi（wokwi-cli v0.29.1。トークンは環境変数 WOKWI_CLI_TOKEN か ~/.config/wokwi/token）
+tools/wokwi.sh                     # 4本のシナリオ（boot_readings・buttons_mode・wifi_heap・watchdog）
+```
+
+構成は `firmware/sdkconfig.defaults` に、構成ごとのファイルを重ねて作ります（`NODE_SDKCONFIG_EXTRA`）。試験用の Kconfig の項目は、どれも既定で無効です。製品の構成（`firmware/sdkconfig.defaults` だけ）には入りません。
+
+| 構成 | 重ねるファイル | 試験用の項目 | 使うところ |
+|---|---|---|---|
+| qemu | `sdkconfig.qemu` | `NODE_NET_QEMU_ETH`（OpenCores Ethernet。#120）・`NODE_TEST_NO_ADC`（#129） | `tools/qemu.sh test` |
+| qemu-fakehw | ＋`sdkconfig.qemu-fakehw` | ＋`NODE_TEST_FAKE_HW`（hal をフェイクに替える。#132） | `tools/qemu.sh contract`・`soak` |
+| wokwi | `sdkconfig.wokwi` | `NODE_WIFI_ALLOW_OPEN`（Wokwi-GUEST。#128） | `tools/wokwi.sh` |
+| wokwi-hang | ＋`sdkconfig.test-hang` | ＋`NODE_TEST_HANG_TASK`（ui が10秒で止まる。#119・#131） | `tools/wokwi.sh watchdog` |
+
+MQTT のパスワードは、ビルドのディレクトリ（`build/`。コミットしない）にだけ書きます。ログの判定は `tools/emu_check.py` です。
+
+### 確かめられること・確かめられないこと
+
+| 項目 | QEMU | Wokwi | 出典・理由 |
+|---|---|---|---|
+| 起動・4つのタスク・BOOT（power_on） | ○ | ○ | 両方の試験で確かめた |
+| タスクウォッチドッグからの再起動（BOOT が watchdog） | ×（働かない。#131） | ○ | QEMU：資料は「Timer Group watchdog timers are emulated」とするが、ESP-IDF v5.5.6 同梱の QEMU（esp_develop_9.2.2_20260417）では段階の割り込みもリセットも起きなかった（#131） |
+| Wi-Fi | × | ○（Wokwi-GUEST） | QEMU：esp-toolchain-docs の `qemu/esp32s3/README.md` の対応する周辺の一覧に Wi-Fi がない。Wokwi：docs.wokwi.com/guides/esp32-wifi「virtual WiFi access point called Wokwi-GUEST. It is an open access point」（チャネル 6） |
+| MQTT（ACL・パスワード付きの Mosquitto）と契約テスト | ○（OpenCores Ethernet。9件合格） | × | QEMU：同 README の一覧に「OpenCores Ethernet MAC」。`idf.py qemu` も `-nic user,model=open_eth` を付ける。Wokwi：ローカルにつなぐ Private Gateway（`host.wokwi.internal`）は「only available for paying users」（同 esp32-wifi）で、wokwi-cli・CI で使えるかは資料に書かれていない。公開のブローカーは使わない（#122） |
+| I2C の機器（BME280・BH1750・SSD1306） | ×（フェイクに替えて確かめる。#132） | ○（BME280・BH1750 はカスタムチップ、SSD1306 は部品） | QEMU：同 README の一覧に I2C がない。Wokwi：部品の一覧に BME280・BH1750 がない。チップは Custom Chips API（`wokwi-api.h`）でデータシートのレジスタだけを再現し、値は P3 のフェイクと同じ（#127） |
+| ADC（土壌水分） | ×（起動時に止まるので使わない。#129） | ○（ポテンショメーター） | QEMU：同 README の一覧に ADC がない。esp_adc の起動時の校正が終わらない（#129） |
+| PWM（LEDC）・GPIO の出力 | × | △（LED・リレーをつなぐが、シナリオでは確かめない） | QEMU：同 README の一覧に LEDC・GPIO がない |
+| ボタンとモード（FR-08） | × | ○ | Wokwi：wokwi-pushbutton の制御 `pressed` |
+| OLED の表示 | × | ○（画面の画像を比べる）。消灯（Display OFF）は写らない | Wokwi の画面の取り込みは表示のメモリの内容（P7 で確かめた）。表示の向きは180度回る（#134。実機フェーズで確かめる） |
+| ヒープの最低残量（Wi-Fi が動いた後） | 参考（Wi-Fi なし） | ○ | 判定は Wokwi（#115） |
+| NFR-03（ヒープが減らない） | ○（30分） | × | 24時間は実機フェーズ（#125） |
+| I2C のバスの回復・センサーの故障と復帰 | × | × | どちらも機器の故障を入れられない。ホスト版（fakehw と単体テスト）で確かめる |
+| ライトスリープ・消費電流・電源の瞬断 | × | × | P6 で入れていない（#107）。実機フェーズ |
+
+### 測った値（P7）
+
+スタックの残りの最小（high water mark。単位はバイト）。各タスクで最も少なかった値を太字にしています。
+
+| タスク | 大きさ（#97） | QEMU・機器なし（75秒） | QEMU・fakehw・MQTT 接続（30分） | Wokwi・Wi-Fi（62秒） | 最小（割合） |
+|---|---|---|---|---|---|
+| control | 8,192 | 4,768 | **3,768** | 4,856 | 3,768（46%） |
+| sense | 4,096 | **1,920** | 2,392 | 1,960 | 1,920（47%） |
+| comm | 6,144 | 4,560 | **4,424** | 4,568 | 4,424（72%） |
+| ui | 4,096 | **1,696** | 2,120 | 1,736 | 1,696（41%） |
+
+どのタスクも 25% 以上残るので、#97 の値は変えません（#124）。ただし、どの環境でも通らない経路があります。I2C のバスの回復（SCL の15回のクロック）、Wi-Fi の切断と再接続、MQTT の再接続の直後に一度に送る処理です。実機フェーズで、これらを通した後の値を見直します。
+
+ヒープ（`stats` の heap_min と、wokwi-cli の `--heap-csv` の標本）：
+
+| 環境 | heap_min | 判定 |
+|---|---|---|
+| Wokwi：Wi-Fi に接続した後（MQTT は接続を試みるだけ） | 144,432 バイト | 30KB 以上（#115）：合格 |
+| QEMU：Ethernet と MQTT で30分 | 5分後 210,592 → 30分後 210,592 バイト | 下がっていない（NFR-03。#125）：合格 |
+
+Wi-Fi と MQTT の接続を同時に測れる環境はありません。QEMU では、Ethernet・lwIP・esp-mqtt が動いた状態での heap_free が約 217KB でした。Wokwi では、Wi-Fi が動いた状態で約 147KB でした。両方が動いても 30KB を大きく上回る見込みですが、確かめるのは実機フェーズです。
+
+### Wokwi の時間と無料枠
+
+- 無料の利用者の CI は、シミュレーションの時間で30日あたり50分まで、1回の実行は実際の経過時間で5分まで（docs.wokwi.com/wokwi-ci/getting-started「Free users: 50 minutes」「The simulation time is calculated as the sum of the simulation time of all the tests」）
+- `tools/wokwi.sh` は、シナリオごとのシミュレーションの時間と合計をログに出す。P7 の目安：boot_readings 13秒・buttons_mode 41秒・wifi_heap 62秒・watchdog 17秒、合計で約133秒。無料枠では30日におよそ22回流せる
+- タイムアウト（シミュレーションの時間）は、目安の約2倍に設定している。boot_readings 40秒・buttons_mode 60秒・wifi_heap 90秒・watchdog 40秒
+- CI の Wokwi は別のワークフロー（`.github/workflows/wokwi.yml`）。動くのは、main への push で `firmware/`・`src/`・`wokwi/` が変わったときと、手動の実行のときだけ（#133）
+- Wokwi のサーバーとの接続が、シミュレーションが始まる前に切れることがある（API Error、code 1006。P7 で2回あった）。時間を使わずに失敗したときだけ、15秒待って2回まで流し直す
+
+## RAM の見直し（P7）
+
+振る舞いは変えずに、持ち方だけを変えました（#116）。
+
+- **イベントの保持と確認待ち**：JSON の写しではなく、電文を作り直すのに要る値を持つ。送った後は msg_id・seq・ts も持つ（`infra::EnvelopeFields`）
+- **重複排除の64件**：ack を作り直すのに要る値（`domain::AckRecord`）を持つ
+- **送り直し待ち**：8件の1件あたりを 2KB から 1KB にした。cmd_ack と state の最大の電文が収まることを、単体テストで確かめている
+
+作り直した電文が元とバイト単位で同じになることは、単体テストで確かめています（イベント、確認待ち、9種類の cmd への重複した ack）。
+
+| 区分（`idf.py size`、製品の構成） | 見直す前（P6） | 見直した後（P7） |
+|---|---|---|
+| DIRAM | 303,535／341,760 バイト（88.8%） | 231,439／341,760 バイト（67.7%。残り 110,321） |
+| Node（静的に確保） | 124.5KB | 52.4KB |
+| フラッシュ（コード） | 744,666 バイト | 745,046 バイト |
+| フラッシュ（データ） | 146,044 バイト | 146,060 バイト |
+| イメージ全体 | 1,010,381 バイト | 1,010,777 バイト |
+
+- **IRAM の 100%**：ESP32-S3 では、命令の専用の 16KB を使い切った分は、データと共有の DIRAM に置かれます。そのため見る値は DIRAM です。出典は ESP-IDF v5.5.6 のリンカースクリプト（`memory.ld`・`sections.ld`「iram0_0_seg and dram0_0_seg reflect the same address space」）と、memory-types.rst です（#126）
+- **comm のリングバッファ**（静的な領域で、DIRAM に含まれる）は変えていません。理由は次のとおりです
+  - 送信の依頼（16KB）：再接続の直後に一度にたまる量で考えた。保持しているイベント32件（QoS 1 の確認待ちの上限も32件）に state と telemetry を足すと、約13KB になる。電文の大きさは実測で、state 742・event 約300・telemetry 最大731 バイトに、トピックと見出しを足した。あふれても publish が Busy を返し、Publisher が種類ごとの決まりどおり後回しにするか捨てる（#15）
+  - 受信（8KB）：最大の cmd（電文 2,048 バイト＋トピックと見出し）を3件以上持てる。control は 10ms ごとに取り出す
+
+## いまの数値（P7 の完了時）
+
+### カバレッジ（GCC 13.3、gcovr 7.0、CTest 223 件）
 
 | 層 | 行 | 分岐 | 合格条件 |
 |---|---|---|---|
-| `src/domain` | 92.5%（222／240） | 86.5%（135／156） | 行 80% 以上 |
-| `src/app` | 96.1%（1145／1191） | 85.8%（597／696） | 行 80% 以上 |
-| `src/infra` | 96.1%（524／545） | 81.3%（330／406） | 報告だけ |
-| `src/drivers`（fake を除く） | 89.2%（414／464） | 73.9%（176／238） | 報告だけ |
-| `src/` 全体（参考） | 78.8%（2752／3493） | 67.5%（1369／2029） | — |
+| `src/domain` | 92.5%（222／240） | 86.2%（131／152） | 行 80% 以上 |
+| `src/app` | 96.1%（1163／1210） | 85.8%（602／702） | 行 80% 以上 |
+| `src/infra` | 96.2%（530／551） | 82.0%（333／406） | 報告だけ |
+| `src/drivers`（fake を除く） | 89.4%（415／464） | 73.9%（176／238） | 報告だけ |
+| `src/` 全体（参考） | 79.1%（2782／3519） | 67.7%（1376／2031） | — |
 
-`src/` 全体の値が低いのは、`src/platform/host`（Paho・main。CTest では動かさず、契約テストと broker_restart.py で動かす）を含むためです。`src/platform/esp32` はホスト版でビルドしないので数に入りません。
+`src/` 全体の値が低いのは、`src/platform/host`（Paho・main）を含むためです。これは CTest では動かさず、契約テストと broker_restart.py で動かしています。`src/platform/esp32` はホスト版でビルドしないので、数に入りません（QEMU と Wokwi で動かす）。
 
-### ターゲット版のイメージの大きさ（`idf.py size`、ESP-IDF v5.5.6）
+### ターゲット版のイメージの大きさ（`idf.py size`、ESP-IDF v5.5.6、製品の構成）
 
 | 区分 | 使用 | 割合 |
 |---|---|---|
-| フラッシュ（コード `.text`） | 744,666 バイト | — |
-| フラッシュ（データ `.rodata` など） | 146,044 バイト | — |
-| DIRAM（`.bss`・`.data`・`.text`） | 303,535／341,760 バイト | 88.8%（残り 38,225） |
-| IRAM | 16,384／16,384 バイト | 100% |
-| イメージ全体 | 1,010,381 バイト | — |
+| フラッシュ（コード `.text`） | 745,046 バイト | — |
+| フラッシュ（データ `.rodata` など） | 146,060 バイト | — |
+| DIRAM（`.bss`・`.data`・`.text`） | 231,439／341,760 バイト | 67.7%（残り 110,321） |
+| IRAM | 16,384／16,384 バイト | 100%（あふれた分は DIRAM に置かれる。#126） |
+| イメージ全体 | 1,010,777 バイト | — |
 
-DIRAM の最大は Node（静的に確保、124.5KB）。ヒープに残る約 38KB で Wi-Fi・lwIP・esp-mqtt が足りるかは、起動時と1分ごとのログ（`stats`：ヒープの空き・最低残量・スタックの残り）で P7 と実機フェーズに確かめる（#114）。
+見直す前（P6）との比べは「RAM の見直し（P7）」にあります。Wi-Fi が動いた後のヒープの最低残量（Wokwi）は 144,432 バイトです。
 
 ### 複雑度（lizard 1.17.31）
 
-- 関数 736 個（`src/platform/esp32` を含む）、平均の循環的複雑度 2.4、最大 10（6 関数：`Bme280::init`・`PahoMqttLink::publish`・`CommandService::set_actuator`・`CommandService::precheck`・`JsonWriter::put_escaped`・`support::to_string`）
-- 最も長い関数：`main`（55 行）。引数の最大：`Node::Node`（8 個）
+- 関数 745 個（`src/platform/esp32` を含む）、平均の循環的複雑度 2.5、最大 10（6 関数：`Bme280::init`・`PahoMqttLink::publish`・`CommandService::set_actuator`・`CommandService::precheck`・`JsonWriter::put_escaped`・`support::to_string`）
+- 最も長い関数：`main`（ホスト版。57 行）。引数の最大：`Node::Node`（10 個）
 
 ### その他
 
