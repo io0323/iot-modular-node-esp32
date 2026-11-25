@@ -15,6 +15,8 @@ class JsonlLogSink final : public infra::ILogSink {
   ~JsonlLogSink() override;
   JsonlLogSink(const JsonlLogSink&) = delete;
   JsonlLogSink& operator=(const JsonlLogSink&) = delete;
+  JsonlLogSink(JsonlLogSink&&) = delete;
+  JsonlLogSink& operator=(JsonlLogSink&&) = delete;
 
   [[nodiscard]] bool ok() const { return file_ != nullptr; }
   void write(std::string_view event, std::string_view fields_json) override;

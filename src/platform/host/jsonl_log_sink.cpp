@@ -6,11 +6,13 @@
 
 namespace node::platform {
 
-JsonlLogSink::JsonlLogSink(const std::string& path) : file_(std::fopen(path.c_str(), "a")) {}
+// FILE* はこのクラスが持ち、デストラクタで閉じる（docs/quality.md の抑止の表）
+JsonlLogSink::JsonlLogSink(const std::string& path)
+    : file_(std::fopen(path.c_str(), "a")) {}  // NOLINT(cppcoreguidelines-owning-memory)
 
 JsonlLogSink::~JsonlLogSink() {
   if (file_ != nullptr) {
-    std::fclose(file_);
+    (void)std::fclose(file_);  // NOLINT(cppcoreguidelines-owning-memory)：コンストラクタで開いた FILE* を閉じる
   }
 }
 
@@ -29,9 +31,15 @@ void JsonlLogSink::write(std::string_view event, std::string_view fields_json) {
   }
   const bool empty_body = body == "}";
   std::lock_guard<std::mutex> const lock(mu_);
-  std::fprintf(file_, "{\"ts\":\"%s\",\"ev\":\"%.*s\"%s%.*s\n", ts.c_str(), static_cast<int>(event.size()),
-               event.data(), empty_body ? "" : ",", static_cast<int>(body.size()), body.data());
-  std::fflush(file_);
+  std::string line;
+  line.reserve(32 + ts.size() + event.size() + body.size());
+  line.append(R"({"ts":")").append(ts.c_str()).append(R"(","ev":")").append(event).append("\"");
+  if (!empty_body) {
+    line.append(",");
+  }
+  line.append(body).append("\n");
+  (void)std::fwrite(line.data(), 1, line.size(), file_);
+  (void)std::fflush(file_);
 }
 
 }  // namespace node::platform

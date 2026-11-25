@@ -1,15 +1,13 @@
 #include "app/event_service.hpp"
 
+#include <algorithm>
 #include <array>
 
 namespace node::app {
 
 std::size_t EventService::normal_count() const {
-  std::size_t n = 0;
-  for (const Pending& p : queue_) {
-    n += (p.role == Role::Normal || p.role == Role::Boot) ? 1U : 0U;
-  }
-  return n;
+  return static_cast<std::size_t>(
+      std::ranges::count_if(queue_, [](const Pending& p) { return p.role == Role::Normal || p.role == Role::Boot; }));
 }
 
 void EventService::drop_oldest() {

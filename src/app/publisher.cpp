@@ -39,26 +39,8 @@ Result<Publisher::Sent> Publisher::send_built(Kind kind, std::string_view messag
   if (retryable && commit && !retries_.empty()) {
     return enqueue_retry(kind, message, seq);
   }
-
-  const auto deferred = [&]() -> Result<Sent> {
-    if (kind == Kind::Telemetry) {
-      return make_error(ErrorCode::Busy, "telemetry dropped");
-    }
-    if (kind == Kind::Event) {
-      ++counters_.event_deferred;
-      return make_error(ErrorCode::Busy, "event deferred");
-    }
-    if (!commit) {
-      return make_error(ErrorCode::Busy, "busy");
-    }
-    return enqueue_retry(kind, message, seq);
-  };
-
   if (!limiter_.try_take(kind, clock_.monotonic_ms())) {
-    if (kind == Kind::Telemetry) {
-      ++counters_.telemetry_rate_dropped;
-    }
-    return deferred();
+    return defer(kind, message, seq, commit, true);
   }
   const Result<std::uint32_t> r = send_now(kind, message);
   if (r) {
@@ -68,12 +50,25 @@ Result<Publisher::Sent> Publisher::send_built(Kind kind, std::string_view messag
     return Sent{r.value(), seq};
   }
   if (r.error().code == ErrorCode::Busy) {
-    if (kind == Kind::Telemetry) {
-      ++counters_.telemetry_busy_dropped;
-    }
-    return deferred();
+    return defer(kind, message, seq, commit, false);
   }
   return r.error();
+}
+
+Result<Publisher::Sent> Publisher::defer(Kind kind, std::string_view message, std::uint32_t seq, bool commit,
+                                         bool rate_limited) {
+  if (kind == Kind::Telemetry) {
+    ++(rate_limited ? counters_.telemetry_rate_dropped : counters_.telemetry_busy_dropped);
+    return make_error(ErrorCode::Busy, "telemetry dropped");
+  }
+  if (kind == Kind::Event) {
+    ++counters_.event_deferred;
+    return make_error(ErrorCode::Busy, "event deferred");
+  }
+  if (!commit) {
+    return make_error(ErrorCode::Busy, "busy");
+  }
+  return enqueue_retry(kind, message, seq);
 }
 
 Result<Publisher::Sent> Publisher::republish(Kind kind, std::string_view message, std::uint32_t seq) {

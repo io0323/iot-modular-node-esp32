@@ -2,6 +2,7 @@
 // 実機の代わりにレジスタの応答を返し、故障（NACK・タイムアウト・バスのハング）を注入できる。ヒープを使わない。
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -95,12 +96,11 @@ class FakeI2cBus final : public hal::II2cBus {
       --fail_next_;
       return nullptr;
     }
-    for (Entry& e : devices_) {
-      if (e.addr == addr) {
-        return (e.nack || e.timeout) ? nullptr : &e;
-      }
+    auto* it = std::ranges::find_if(devices_, [addr](const Entry& e) { return e.addr == addr; });
+    if (it == devices_.end()) {
+      return nullptr;  // つながっていないアドレスは NACK
     }
-    return nullptr;  // つながっていないアドレスは NACK
+    return (it->nack || it->timeout) ? nullptr : it;
   }
 
   support::StaticVector<Entry, kMaxDevices> devices_{};

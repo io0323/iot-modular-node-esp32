@@ -88,7 +88,7 @@ class EventService {
   [[nodiscard]] std::size_t normal_count() const;
   void drop_oldest();
   bool insert_front(const Pending& p);
-  support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
+  static support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
 
   support::StaticVector<Pending, kCapacity + 2> queue_{};
   support::StaticVector<Inflight, kCapacity> inflight_{};

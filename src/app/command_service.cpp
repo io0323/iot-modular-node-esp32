@@ -60,23 +60,27 @@ CommandOutcome CommandService::handle(std::string_view json, std::uint64_t now_m
   return out;
 }
 
+std::optional<RejectReason> CommandService::precheck(const infra::CmdRequest& req, std::int64_t now_utc_ms) {
+  if (req.priority_state != FieldState::Ok || req.op_state != FieldState::Ok) {
+    return RejectReason::InvalidArg;
+  }
+  if (req.op == OpKind::Unknown || req.op == OpKind::SetParam) {
+    return RejectReason::UnknownOp;
+  }
+  if (invalid(req.origin_state) || invalid(req.args_state) || invalid(req.expires_state)) {
+    return RejectReason::InvalidArg;
+  }
+  if (req.expires_state == FieldState::Ok && now_utc_ms > req.expires_at_ms) {
+    return RejectReason::Expired;
+  }
+  return std::nullopt;
+}
+
 CommandService::Exec CommandService::execute(const infra::CmdRequest& req, std::uint64_t now_ms,
                                              std::int64_t now_utc_ms, CommandOutcome& out) {
   Exec e{};
-  if (req.priority_state != FieldState::Ok || req.op_state != FieldState::Ok) {
-    e.reject = RejectReason::InvalidArg;
-    return e;
-  }
-  if (req.op == OpKind::Unknown || req.op == OpKind::SetParam) {
-    e.reject = RejectReason::UnknownOp;
-    return e;
-  }
-  if (invalid(req.origin_state) || invalid(req.args_state) || invalid(req.expires_state)) {
-    e.reject = RejectReason::InvalidArg;
-    return e;
-  }
-  if (req.expires_state == FieldState::Ok && now_utc_ms > req.expires_at_ms) {
-    e.reject = RejectReason::Expired;
+  if (const std::optional<RejectReason> r = precheck(req, now_utc_ms)) {
+    e.reject = r;
     return e;
   }
   switch (req.op) {

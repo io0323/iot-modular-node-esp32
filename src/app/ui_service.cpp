@@ -8,10 +8,11 @@ using Line = UiService::Line;
 void put_uint(Line& l, std::uint64_t v) {
   std::array<char, 20> tmp{};
   std::size_t n = 0;
-  do {
+  // 0 でも1桁は書く（最初の1回は必ず回る）
+  for (bool more = true; more; more = v != 0U) {
     tmp[n++] = static_cast<char>('0' + static_cast<int>(v % 10U));
     v /= 10U;
-  } while (v != 0U);
+  }
   while (n > 0) {
     (void)l.push_back(tmp[--n]);
   }

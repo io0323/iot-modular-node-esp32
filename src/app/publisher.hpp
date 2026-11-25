@@ -56,7 +56,7 @@ class Publisher {
   /// @param stamp 電文の時刻（イベントの発生時刻など）。nullptr ならいま
   /// @return 送れた・送り直し待ちに入れたなら成功。未接続なら NotConnected、上限で送れなければ Busy
   template <typename F>
-  support::Result<Sent> publish(infra::Kind kind, F&& write_payload, const infra::Stamp* stamp = nullptr) {
+  support::Result<Sent> publish(infra::Kind kind, const F& write_payload, const infra::Stamp* stamp = nullptr) {
     if (!online()) {
       return support::make_error(support::ErrorCode::NotConnected, "not connected");
     }
@@ -104,6 +104,10 @@ class Publisher {
   support::Result<Sent> send_built(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit);
   support::Result<std::uint32_t> send_now(infra::Kind kind, std::string_view message);
   support::Result<Sent> enqueue_retry(infra::Kind kind, std::string_view message, std::uint32_t seq);
+  // 上限（rate_limited）か確認待ちがいっぱいで送れなかった：telemetry は捨てる、event は保持へ、
+  // cmd_ack・state は送り直し待ちへ（#15）
+  support::Result<Sent> defer(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit,
+                              bool rate_limited);
   void log_tx(infra::Kind kind, std::string_view message);
 
   infra::IMqttLink& link_;

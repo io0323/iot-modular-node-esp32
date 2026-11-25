@@ -52,7 +52,7 @@ class ModeState {
 /// 手動モードは、入った時刻か最後の手動操作の時刻から30分ちょうどで自動に戻る（P2 の決定 #27）。
 class ModeManager {
  public:
-  static constexpr std::uint64_t kManualTimeoutMs = 30U * 60U * 1000U;
+  static constexpr std::uint64_t kManualTimeoutMs = std::uint64_t{30} * 60U * 1000U;
 
   ModeManager();
 

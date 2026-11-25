@@ -201,6 +201,8 @@ void Node::on_lost(std::uint64_t now) {
   log_fields("disconnect", "cause", connection_.network_up() ? "connection_lost" : "network_down");
 }
 
+// buf は JsonWriter が書き込むので const にできない（cppcheck の誤検出。docs/quality.md の抑止の表）
+// cppcheck-suppress constParameterReference
 std::string_view Node::build_offline_state(std::array<char, Publisher::kMessageMax>& buf) {
   // offline の state は seq を進めず、その時点で次に使う値を入れる（共通仕様 v0.2.1 #29）
   infra::JsonWriter w(buf);

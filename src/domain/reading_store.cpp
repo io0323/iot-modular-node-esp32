@@ -1,23 +1,17 @@
 #include "domain/reading_store.hpp"
 
+#include <algorithm>
+
 namespace node::domain {
 
 ReadingStore::Entry* ReadingStore::find(std::string_view channel) {
-  for (auto& e : entries_) {
-    if (e.reading.channel == channel) {
-      return &e;
-    }
-  }
-  return nullptr;
+  auto* it = std::ranges::find_if(entries_, [channel](const Entry& e) { return e.reading.channel == channel; });
+  return it == entries_.end() ? nullptr : it;
 }
 
 const ReadingStore::Entry* ReadingStore::find(std::string_view channel) const {
-  for (const auto& e : entries_) {
-    if (e.reading.channel == channel) {
-      return &e;
-    }
-  }
-  return nullptr;
+  const auto* it = std::ranges::find_if(entries_, [channel](const Entry& e) { return e.reading.channel == channel; });
+  return it == entries_.end() ? nullptr : it;
 }
 
 ReadingStore::Entry* ReadingStore::find_or_add(std::string_view channel) {

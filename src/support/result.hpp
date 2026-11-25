@@ -16,9 +16,14 @@ class [[nodiscard]] Result {
 
  public:
   /// @brief 値で成功を作る。
+  /// @param value 値
+  // 値・エラーをそのまま return できるように暗黙の変換にする（std::expected と同じ考え方。docs/quality.md の抑止の表）
+  // cppcheck-suppress noExplicitConstructor
   Result(T value) : ok_(true), value_(std::move(value)) {}  // NOLINT(google-explicit-constructor)
   /// @brief エラーで失敗を作る。
-  Result(Error error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
+  /// @param error エラー
+  // cppcheck-suppress noExplicitConstructor
+  Result(const Error& error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
 
   /// @brief 成功したか。
   [[nodiscard]] bool has_value() const { return ok_; }
@@ -47,7 +52,9 @@ class [[nodiscard]] Result<void> {
   /// @brief 成功を作る。
   Result() = default;
   /// @brief エラーで失敗を作る。
-  Result(Error error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
+  /// @param error エラー
+  // cppcheck-suppress noExplicitConstructor
+  Result(const Error& error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
 
   /// @brief 成功したか。
   [[nodiscard]] bool has_value() const { return ok_; }

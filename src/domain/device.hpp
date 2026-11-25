@@ -65,7 +65,7 @@ class DeviceRegistry {
   /// @param rules ローカルルールの並び（寿命はプログラム全体）
   /// @param ui 本体の UI の機器（ボタン・OLED。なければ空）
   DeviceRegistry(std::span<ISensor* const> sensors, std::span<const ActuatorBinding> actuators,
-                 std::span<const Rule> rules = {}, UiDevices ui = {})
+                 std::span<const Rule> rules = {}, const UiDevices& ui = {})
       : sensors_(sensors), actuators_(actuators), rules_(rules), ui_(ui) {}
 
   [[nodiscard]] std::span<ISensor* const> sensors() const { return sensors_; }

@@ -93,6 +93,12 @@ void PahoMqttLink::disconnect(std::uint32_t timeout_ms) {
   forget_inflight();
 }
 
+namespace {
+// コールバックの引数から送った電文のトークンを取る（Paho が NULL を渡したら 0）
+int token_of(const MQTTAsync_successData* r) { return r != nullptr ? r->token : 0; }
+int token_of(const MQTTAsync_failureData* r) { return r != nullptr ? r->token : 0; }
+}  // namespace
+
 Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_view payload, infra::Qos qos,
                                             bool retain) {
   if (client_ == nullptr || !connected_.load()) {
@@ -108,13 +114,17 @@ Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_
   MQTTAsync_message msg = MQTTAsync_message_initializer;
   MQTTAsync_responseOptions ropts = MQTTAsync_responseOptions_initializer;
   NODE_PAHO_INIT_END
-  msg.payload = const_cast<char*>(payload.data());  // Paho は送る前に写しを取る（const を受けない API）
+  // Paho の API は const を受けないが、送る前に写しを取るので書き換えない（docs/quality.md の抑止の表）
+  msg.payload = const_cast<char*>(payload.data());  // NOLINT(cppcoreguidelines-pro-type-const-cast)
   msg.payloadlen = static_cast<int>(payload.size());
   msg.qos = static_cast<int>(qos);
   msg.retained = retain ? 1 : 0;
   if (qos1) {
-    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_success(ctx, r != nullptr ? r->token : 0); };
-    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_failure(ctx, r != nullptr ? r->token : 0); };
+    // 引数の型は Paho のコールバックの型どおり（const にできない。docs/quality.md の抑止の表）
+    // cppcheck-suppress constParameterPointer
+    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_success(ctx, token_of(r)); };
+    // cppcheck-suppress constParameterPointer
+    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_failure(ctx, token_of(r)); };
     ropts.context = this;
   }
   // Paho を呼ぶ間は mu_ を持たない（Paho のスレッドのコールバックも mu_ を取るので、持ったまま呼ぶとデッドロックしうる）
@@ -126,15 +136,17 @@ Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_
   if (!qos1) {
     return std::uint32_t{0};
   }
-  {
-    std::lock_guard<std::mutex> const lock(mu_);
-    if (early_acked_.erase(ropts.token) > 0) {
-      delivered_.push_back(static_cast<std::uint32_t>(ropts.token));  // 表に入れる前に PUBACK が届いていた
-    } else {
-      inflight_tokens_.insert(ropts.token);
-    }
-  }
+  track(ropts.token);
   return static_cast<std::uint32_t>(ropts.token);
+}
+
+void PahoMqttLink::track(int token) {
+  std::lock_guard<std::mutex> const lock(mu_);
+  if (early_acked_.erase(token) > 0) {
+    delivered_.push_back(static_cast<std::uint32_t>(token));  // 表に入れる前に PUBACK が届いていた
+  } else {
+    inflight_tokens_.insert(token);
+  }
 }
 
 Result<void> PahoMqttLink::subscribe(std::string_view topic, infra::Qos qos) {

@@ -1,5 +1,6 @@
 #include "platform/host/host_clock.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace node::platform {
@@ -35,12 +36,7 @@ HostNetwork::HostNetwork(std::vector<Window> down_windows)
 bool HostNetwork::in_down_window() const {
   const auto elapsed = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started_).count());
-  for (const Window& w : down_) {
-    if (elapsed >= w.begin_ms && elapsed < w.end_ms) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(down_, [elapsed](const Window& w) { return elapsed >= w.begin_ms && elapsed < w.end_ms; });
 }
 
 support::Result<void> HostNetwork::connect() {

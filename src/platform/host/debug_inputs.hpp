@@ -56,6 +56,11 @@ class DebugInputs {
     std::int32_t value{0};
     bool done{false};
   };
+  void parse_sim(std::string_view value, std::string& error);
+  void parse_sim_fault(std::string_view value, std::string& error);
+  void parse_manual(std::string_view value, std::string& error);
+  static void apply(const Action& a, app::Node& node, IDebugTarget& target, infra::ILogSink& log);
+
   std::vector<Action> actions_;
 };
 

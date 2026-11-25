@@ -47,6 +47,9 @@ class FakeHwRig {
   FakeHwRig(hal::ITimer& timer, hal::IMutex& i2c_mutex);
   FakeHwRig(const FakeHwRig&) = delete;
   FakeHwRig& operator=(const FakeHwRig&) = delete;
+  FakeHwRig(FakeHwRig&&) = delete;
+  FakeHwRig& operator=(FakeHwRig&&) = delete;
+  ~FakeHwRig() = default;
 
   [[nodiscard]] domain::DeviceRegistry registry() {
     return domain::DeviceRegistry(sensors_, actuators_, kRules,
@@ -54,15 +57,40 @@ class FakeHwRig {
   }
 
   // ---- フェイク（テスト・デバッグ入力から値や故障を入れる）
-  drivers::fake::FakeI2cBus bus;
-  drivers::fake::FakeBme280Device bme280_device;
-  drivers::fake::FakeBh1750Device bh1750_device;
-  drivers::fake::FakeSsd1306Device ssd1306_device;
-  drivers::fake::FakeAdc adc;
-  drivers::fake::FakePwm pwm;
-  drivers::fake::FakeGpio gpio;
+  /// @brief I2C バスのフェイク。
+  /// @return バス
+  drivers::fake::FakeI2cBus& bus() { return bus_; }
+  /// @brief BME280 のフェイク。
+  /// @return 機器
+  drivers::fake::FakeBme280Device& bme280_device() { return bme280_device_; }
+  /// @brief BH1750 のフェイク。
+  /// @return 機器
+  drivers::fake::FakeBh1750Device& bh1750_device() { return bh1750_device_; }
+  /// @brief SSD1306 のフェイク。
+  /// @return 機器
+  drivers::fake::FakeSsd1306Device& ssd1306_device() { return ssd1306_device_; }
+  /// @brief ADC のフェイク。
+  /// @return ADC
+  drivers::fake::FakeAdc& adc() { return adc_; }
+  /// @brief PWM のフェイク。
+  /// @return PWM
+  drivers::fake::FakePwm& pwm() { return pwm_; }
+  /// @brief PWM のフェイク（読むだけ）。
+  /// @return PWM
+  [[nodiscard]] const drivers::fake::FakePwm& pwm() const { return pwm_; }
+  /// @brief GPIO のフェイク。
+  /// @return GPIO
+  drivers::fake::FakeGpio& gpio() { return gpio_; }
 
  private:
+  drivers::fake::FakeI2cBus bus_;
+  drivers::fake::FakeBme280Device bme280_device_;
+  drivers::fake::FakeBh1750Device bh1750_device_;
+  drivers::fake::FakeSsd1306Device ssd1306_device_;
+  drivers::fake::FakeAdc adc_;
+  drivers::fake::FakePwm pwm_;
+  drivers::fake::FakeGpio gpio_;
+
   static constexpr std::array<domain::ChannelSpec, 3> kBmeChannels{{
       {"temp_air", domain::Unit::DegC, 2000},
       {"humidity", domain::Unit::PctRh, 2000},

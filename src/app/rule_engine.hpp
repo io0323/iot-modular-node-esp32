@@ -50,8 +50,13 @@ class RuleEngine {
     std::optional<std::uint64_t> last_pulse_ms;    ///< 最後にパルスを始めた時刻（クールダウン）
   };
 
-  std::optional<domain::Level> step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
+  static std::optional<domain::Level> step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
                                     std::uint64_t now_ms, bool active);
+  // ヒステリシスのルール（pulse_ms が 0）
+  static std::optional<domain::Level> step_hysteresis(const domain::Rule& r, State& st, std::int32_t value);
+  // パルスのルール（クールダウンつき）
+  static std::optional<domain::Level> step_pulse(const domain::Rule& r, State& st, std::int32_t value,
+                                                 std::uint64_t now_ms);
 
   std::span<const domain::Rule> rules_;
   std::array<State, kMaxRules> states_{};

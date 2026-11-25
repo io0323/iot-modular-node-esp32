@@ -40,8 +40,8 @@ ControlArbiter::CommandResult ControlArbiter::set_command(std::size_t index, Lev
                                                           std::uint32_t lease_s, std::uint64_t now_ms,
                                                           InterlockChanges& changes) {
   Slot& s = slots_[index];
-  const domain::ActuatorSpec& spec = s.actuator->spec();
-  const Level clamped = clamp_to(spec, level);
+  const domain::ActuatorSpec& act = s.actuator->spec();
+  const Level clamped = clamp_to(act, level);
   s.has_lease = true;
   s.lease_level = clamped;
   s.priority = priority;
@@ -52,7 +52,7 @@ ControlArbiter::CommandResult ControlArbiter::set_command(std::size_t index, Lev
   r.applied = s.output;
   const bool rounded = clamped != level;
   const bool changed_by_interlock = s.output != clamped;
-  const bool lease_exceeds_max_on = spec.max_on_s && lease_s > *spec.max_on_s;
+  const bool lease_exceeds_max_on = act.max_on_s && lease_s > *act.max_on_s;
   r.limited = rounded || changed_by_interlock || lease_exceeds_max_on;
   return r;
 }
@@ -87,12 +87,8 @@ void ControlArbiter::set_stages(bool manual_enabled, bool rules_enabled) {
 }
 
 bool ControlArbiter::rejects_commands(std::size_t index, std::uint64_t now_ms) const {
-  for (const domain::IInterlock* il : slots_[index].interlocks) {
-    if (il->rejects_commands(store_, now_ms)) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(slots_[index].interlocks,
+                             [&](const domain::IInterlock* il) { return il->rejects_commands(store_, now_ms); });
 }
 
 void ControlArbiter::tick(std::uint64_t now_ms, InterlockChanges& changes) {
@@ -102,35 +98,67 @@ void ControlArbiter::tick(std::uint64_t now_ms, InterlockChanges& changes) {
 }
 
 ControlArbiter::StageResult ControlArbiter::stages(const Slot& s) const {
-  const domain::ActuatorSpec& spec = s.actuator->spec();
+  const domain::ActuatorSpec& act = s.actuator->spec();
   if (s.has_lease) {
     return {s.lease_level, domain::owner_of(s.priority)};
   }
   if (manual_enabled_ && s.manual) {
-    return {clamp_to(spec, *s.manual), Owner::Local};
+    return {clamp_to(act, *s.manual), Owner::Local};
   }
   if (rules_enabled_ && s.rule) {
-    return {clamp_to(spec, *s.rule), Owner::Local};
+    return {clamp_to(act, *s.rule), Owner::Local};
   }
-  return {clamp_to(spec, 0), Owner::None};
+  return {clamp_to(act, 0), Owner::None};
 }
 
+namespace {
+
+/// 複数のインターロックの判定をまとめたもの（強制値は大きい方、上限は小さい方）
+struct Combined {
+  std::optional<Level> force;
+  std::optional<Level> upper;
+};
+
+void merge(Combined& c, const domain::InterlockVerdict& v) {
+  if (v.force) {
+    c.force = c.force ? std::max(*c.force, *v.force) : *v.force;
+  }
+  if (v.upper) {
+    c.upper = c.upper ? std::min(*c.upper, *v.upper) : *v.upper;
+  }
+}
+
+/// このインターロックが出力を実際に変えるか
+bool changes_output(const domain::InterlockVerdict& v, Level pre) {
+  if (v.force) {
+    return *v.force != pre;
+  }
+  return v.upper && pre > *v.upper;
+}
+
+Level apply(const Combined& c, Level pre) {
+  if (c.force) {
+    return *c.force;
+  }
+  return c.upper ? std::min(pre, *c.upper) : pre;
+}
+
+}  // namespace
+
 Level ControlArbiter::apply_interlocks(Slot& s, Level pre, std::uint64_t now_ms, InterlockChanges& changes) {
-  std::optional<Level> force{};
-  std::optional<Level> upper{};
-  std::array<bool, kMaxInterlocksPerActuator> changes_output{};
+  Combined combined{};
+  std::array<bool, kMaxInterlocksPerActuator> changed{};
   for (std::size_t i = 0; i < s.interlocks.size(); ++i) {
     const domain::InterlockVerdict v = s.interlocks[i]->evaluate(domain::InterlockInput{store_, pre, now_ms});
-    if (v.force) {
-      force = force ? std::max(*force, *v.force) : *v.force;
-    }
-    if (v.upper) {
-      upper = upper ? std::min(*upper, *v.upper) : *v.upper;
-    }
-    changes_output[i] = (v.force && *v.force != pre) || (!v.force && v.upper && pre > *v.upper);
+    merge(combined, v);
+    changed[i] = changes_output(v, pre);
   }
-  const Level out = force ? *force : (upper ? std::min(pre, *upper) : pre);
+  announce(s, changed, changes);
+  return apply(combined, pre);
+}
 
+void ControlArbiter::announce(Slot& s, const std::array<bool, kMaxInterlocksPerActuator>& changes_output,
+                              InterlockChanges& changes) {
   // INTERLOCK_ACTIVE は出力を実際に変えたときに、RELEASED は ACTIVE を出した回の条件が解けたときに出す（#24・#37）
   for (std::size_t i = 0; i < s.interlocks.size(); ++i) {
     domain::IInterlock const& il = *s.interlocks[i];
@@ -142,18 +170,17 @@ Level ControlArbiter::apply_interlocks(Slot& s, Level pre, std::uint64_t now_ms,
       (void)changes.push_back(InterlockChange{s.actuator->id(), il.rule(), false});
     }
   }
-  return out;
 }
 
 Level ControlArbiter::hold_for_min_time(const Slot& s, Level wanted, std::uint64_t now_ms) {
   // 0 と 0 より大きい値の切り替えだけを待たせる（オンの間の値の変更はすぐ反映。#59）
-  const domain::ActuatorSpec& spec = s.actuator->spec();
+  const domain::ActuatorSpec& act = s.actuator->spec();
   const bool is_on = s.output > 0;
   const bool want_on = wanted > 0;
   if (is_on == want_on) {
     return wanted;
   }
-  const std::optional<std::uint32_t> min = is_on ? spec.min_on_ms : spec.min_off_ms;
+  const std::optional<std::uint32_t> min = is_on ? act.min_on_ms : act.min_off_ms;
   if (min && now_ms - s.switched_at_ms < *min) {
     return s.output;
   }

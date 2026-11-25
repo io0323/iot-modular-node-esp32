@@ -1,6 +1,8 @@
 #include "infra/formats.hpp"
 
+#include <algorithm>
 #include <array>
+#include <utility>
 
 namespace node::infra {
 namespace {
@@ -23,12 +25,7 @@ constexpr bool is_word(std::string_view s) {
   if (s.empty() || !is_lower(s[0])) {
     return false;
   }
-  for (char const c : s) {
-    if (!is_lower(c) && !is_digit(c)) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_lower(c) || is_digit(c); });
 }
 
 // 2桁の数字を読む。範囲外なら -1
@@ -87,12 +84,7 @@ bool is_ulid(std::string_view s) {
   if (s.size() != 26 || s[0] < '0' || s[0] > '7') {
     return false;
   }
-  for (char const c : s) {
-    if (!is_crockford(c)) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_crockford(c); });
 }
 
 bool is_device_id(std::string_view s) {
@@ -105,10 +97,8 @@ bool is_device_id(std::string_view s) {
   if (number.size() < 2) {
     return false;
   }
-  for (char const c : number) {
-    if (!is_digit(c)) {
-      return false;
-    }
+  if (!std::ranges::all_of(number, [](char c) { return is_digit(c); })) {
+    return false;
   }
   const std::string_view head = s.substr(0, last);
   const std::size_t dash = head.find('-');
@@ -141,27 +131,30 @@ bool is_boot_id(std::string_view s) {
   if (s.size() != 8) {
     return false;
   }
-  for (char const c : s) {
-    if (!is_digit(c) && (c < 'a' || c > 'f')) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_digit(c) || (c >= 'a' && c <= 'f'); });
 }
 
-std::optional<std::int64_t> parse_ts(std::string_view s) {
-  // YYYY-MM-DDTHH:MM:SS.mmmZ
+namespace {
+
+// YYYY-MM-DDTHH:MM:SS.mmmZ の区切りと、年・ミリ秒の数字がそろっているか（月日時分秒の範囲は two_digits で見る）
+bool ts_shape_ok(std::string_view s) {
   if (s.size() != 24) {
-    return std::nullopt;
+    return false;
   }
-  if (s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[19] != '.' ||
-      s[23] != 'Z') {
-    return std::nullopt;
+  constexpr std::array<std::pair<std::size_t, char>, 7> kSeparators{
+      {{4, '-'}, {7, '-'}, {10, 'T'}, {13, ':'}, {16, ':'}, {19, '.'}, {23, 'Z'}}};
+  if (!std::ranges::all_of(kSeparators, [s](const auto& p) { return s[p.first] == p.second; })) {
+    return false;
   }
-  for (std::size_t const i : {0U, 1U, 2U, 3U, 20U, 21U, 22U}) {
-    if (!is_digit(s[i])) {
-      return std::nullopt;
-    }
+  constexpr std::array<std::size_t, 7> kDigits{0, 1, 2, 3, 20, 21, 22};
+  return std::ranges::all_of(kDigits, [s](std::size_t i) { return is_digit(s[i]); });
+}
+
+}  // namespace
+
+std::optional<std::int64_t> parse_ts(std::string_view s) {
+  if (!ts_shape_ok(s)) {
+    return std::nullopt;
   }
   const int month = two_digits(s, 5, 1, 12);
   const int day = two_digits(s, 8, 1, 31);
@@ -174,7 +167,7 @@ std::optional<std::int64_t> parse_ts(std::string_view s) {
   const std::int64_t year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
   const std::int64_t millis = (s[20] - '0') * 100 + (s[21] - '0') * 10 + (s[22] - '0');
   const std::int64_t days = days_from_civil(year, month, day);
-  return ((days * 24 + hour) * 60 + minute) * 60000 + second * 1000 + millis;
+  return ((days * 24 + hour) * 60 + minute) * 60000 + static_cast<std::int64_t>(second) * 1000 + millis;
 }
 
 TsString format_ts(std::int64_t utc_ms) {

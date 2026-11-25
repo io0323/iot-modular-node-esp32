@@ -30,22 +30,10 @@ class Button final : public domain::IButton {
       return domain::ButtonEvent::None;  // 読めなければ判定を進めない
     }
     const bool raw = high.value() != active_low_;  // 押されているか
-    if (raw == candidate_) {
-      if (samples_ < kStableSamples) {
-        ++samples_;
-      }
-    } else {
-      candidate_ = raw;
-      samples_ = 1;
-    }
-    if (samples_ >= kStableSamples && candidate_ != pressed_) {
+    if (debounce(raw)) {
       pressed_ = candidate_;
-      if (pressed_) {
-        pressed_at_ms_ = now_ms;
-        long_fired_ = false;
-      } else if (!long_fired_) {
-        // 1,000ms 未満で離したら短押し。離した判定と 1,000ms が同じ読み取りに重なったら長押し
-        return now_ms - pressed_at_ms_ < kLongPressMs ? domain::ButtonEvent::Short : domain::ButtonEvent::Long;
+      if (const domain::ButtonEvent e = on_edge(now_ms); e != domain::ButtonEvent::None) {
+        return e;
       }
     }
     if (pressed_ && !long_fired_ && now_ms - pressed_at_ms_ >= kLongPressMs) {
@@ -56,6 +44,33 @@ class Button final : public domain::IButton {
   }
 
  private:
+  // 同じ値が kStableSamples 回続いて、押した・離したの判定が変わるなら true
+  bool debounce(bool raw) {
+    if (raw == candidate_) {
+      if (samples_ < kStableSamples) {
+        ++samples_;
+      }
+    } else {
+      candidate_ = raw;
+      samples_ = 1;
+    }
+    return samples_ >= kStableSamples && candidate_ != pressed_;
+  }
+
+  // 押した・離したの判定が変わった（pressed_ は新しい値）
+  domain::ButtonEvent on_edge(std::uint64_t now_ms) {
+    if (pressed_) {
+      pressed_at_ms_ = now_ms;
+      long_fired_ = false;
+      return domain::ButtonEvent::None;
+    }
+    if (long_fired_) {
+      return domain::ButtonEvent::None;  // 長押しの後に離しても短押しにしない
+    }
+    // 1,000ms 未満で離したら短押し。離した判定と 1,000ms が同じ読み取りに重なったら長押し
+    return now_ms - pressed_at_ms_ < kLongPressMs ? domain::ButtonEvent::Short : domain::ButtonEvent::Long;
+  }
+
   hal::IGpio& gpio_;
   hal::Pin pin_;
   bool active_low_;

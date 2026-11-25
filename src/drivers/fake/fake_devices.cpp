@@ -1,6 +1,9 @@
 #include "drivers/fake/fake_devices.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <utility>
 
 #include "drivers/font5x7.hpp"
 #include "drivers/ssd1306.hpp"
@@ -237,19 +240,22 @@ void FakeBh1750Device::on_read(std::span<std::uint8_t> out) {
 
 void FakeBh1750Device::set_lux(double lux) {
   const double c = std::round(lux * 1.2);
-  count_ = static_cast<std::uint16_t>(c < 0 ? 0 : (c > 65535 ? 65535 : c));
+  count_ = static_cast<std::uint16_t>(std::clamp(c, 0.0, 65535.0));
 }
 
 // ---------------- SSD1306（Rev 1.1）
 
 namespace {
 // 引数の数（9 章 表9-1）。ここで使うものだけ
+// コマンドの後に続く引数のバイト数（表にないコマンドは 0）
+constexpr std::array<std::pair<std::uint8_t, std::uint8_t>, 11> kParamCounts{{
+    {0x81, 1}, {0x8D, 1}, {0xA8, 1}, {0xD3, 1}, {0xD5, 1}, {0xD9, 1}, {0xDA, 1}, {0xDB, 1}, {0x20, 1},
+    {0x21, 2}, {0x22, 2},
+}};
+
 std::uint8_t params_of(std::uint8_t cmd) {
-  switch (cmd) {
-    case 0x81: case 0x8D: case 0xA8: case 0xD3: case 0xD5: case 0xD9: case 0xDA: case 0xDB: case 0x20: return 1;
-    case 0x21: case 0x22: return 2;
-    default: return 0;
-  }
+  const auto* it = std::ranges::find_if(kParamCounts, [cmd](const auto& p) { return p.first == cmd; });
+  return it == kParamCounts.end() ? 0 : it->second;
 }
 }  // namespace
 
@@ -293,9 +299,7 @@ void FakeSsd1306Device::on_write(std::span<const std::uint8_t> data) {
 }
 
 void FakeSsd1306Device::on_read(std::span<std::uint8_t> out) {
-  for (std::uint8_t& b : out) {
-    b = 0;
-  }
+  std::ranges::fill(out, std::uint8_t{0});
 }
 
 support::FixedString<21> FakeSsd1306Device::row_text(std::size_t page) const {

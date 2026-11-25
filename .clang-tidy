@@ -33,3 +33,6 @@ Checks: >
 WarningsAsErrors: '*'
 HeaderFilterRegex: '^/src/src/'
 FormatStyle: none
+CheckOptions:
+  # インターフェース（virtual ~X() = default だけを持つ抽象クラス）にコピー・ムーブの宣言を求めない
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true

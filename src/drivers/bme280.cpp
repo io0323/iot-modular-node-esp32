@@ -142,11 +142,11 @@ support::Result<void> Bme280::wait_status_clear(std::uint8_t mask) {
 
 support::Result<void> Bme280::init() {
   initialized_ = false;
-  std::array<std::uint8_t, 1> id{};
-  if (auto r = read_regs(kRegId, id); !r) {
+  std::array<std::uint8_t, 1> chip_id{};
+  if (auto r = read_regs(kRegId, chip_id); !r) {
     return r;
   }
-  if (id[0] != kChipId) {
+  if (chip_id[0] != kChipId) {
     return support::make_error(support::ErrorCode::InvalidArgument, "bme280 chip id mismatch");
   }
   if (auto r = write_reg(kRegReset, kResetWord); !r) {

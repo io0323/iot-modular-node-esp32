@@ -24,7 +24,7 @@ class SensorPoller {
  public:
   static constexpr std::size_t kMaxSensors = 8;
   static constexpr std::size_t kMaxReadings = domain::ReadingStore::kMaxChannels;
-  static constexpr std::uint64_t kReinitIntervalMs = 30U * 1000U;
+  static constexpr std::uint64_t kReinitIntervalMs = std::uint64_t{30} * 1000U;
   static constexpr std::uint32_t kAttemptsBeforeRecovery = 3;
 
   /// @brief センサーの故障・復旧（イベントの元）。

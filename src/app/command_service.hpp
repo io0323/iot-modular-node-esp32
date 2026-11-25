@@ -64,6 +64,8 @@ class CommandService {
     ControlArbiter::CommandResult result{};
   };
 
+  // op に関わらない確かめ（priority・op・origin・args・expires_at）。問題がなければ std::nullopt
+  static std::optional<RejectReason> precheck(const infra::CmdRequest& req, std::int64_t now_utc_ms);
   Exec execute(const infra::CmdRequest& req, std::uint64_t now_ms, std::int64_t now_utc_ms, CommandOutcome& out);
   Exec set_actuator(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);
   Exec release(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);

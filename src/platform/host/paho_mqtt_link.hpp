@@ -34,6 +34,8 @@ class PahoMqttLink final : public infra::IMqttLink {
   ~PahoMqttLink() override;
   PahoMqttLink(const PahoMqttLink&) = delete;
   PahoMqttLink& operator=(const PahoMqttLink&) = delete;
+  PahoMqttLink(PahoMqttLink&&) = delete;
+  PahoMqttLink& operator=(PahoMqttLink&&) = delete;
 
   /// @brief クライアントを作れたか。
   [[nodiscard]] bool ok() const { return client_ != nullptr; }
@@ -65,6 +67,8 @@ class PahoMqttLink final : public infra::IMqttLink {
   static void on_publish_qos1_success(void* context, int token);
   static void on_publish_qos1_failure(void* context, int token);
   void forget_inflight();
+  // 送った QoS 1 の電文のトークンを確認待ちの表に入れる（PUBACK が先に届いていれば delivered_ へ）
+  void track(int token);
 
   void push_event(infra::LinkEvent ev);
 

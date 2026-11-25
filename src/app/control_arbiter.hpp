@@ -104,6 +104,9 @@ class ControlArbiter {
 
   [[nodiscard]] StageResult stages(const Slot& s) const;
   domain::Level apply_interlocks(Slot& s, domain::Level pre, std::uint64_t now_ms, InterlockChanges& changes);
+  // INTERLOCK_ACTIVE・RELEASED を changes に足す（changes_output：そのインターロックが出力を変えたか）
+  static void announce(Slot& s, const std::array<bool, kMaxInterlocksPerActuator>& changes_output,
+                       InterlockChanges& changes);
   [[nodiscard]] static domain::Level hold_for_min_time(const Slot& s, domain::Level wanted, std::uint64_t now_ms);
   void evaluate(Slot& s, std::uint64_t now_ms, InterlockChanges& changes);
 

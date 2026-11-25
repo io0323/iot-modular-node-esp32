@@ -17,7 +17,7 @@ namespace node::domain {
 class CmdDedupCache {
  public:
   static constexpr std::size_t kCapacity = 64;
-  static constexpr std::uint64_t kRetentionMs = 10U * 60U * 1000U;
+  static constexpr std::uint64_t kRetentionMs = std::uint64_t{10} * 60U * 1000U;
   static constexpr std::size_t kCmdIdLen = 26;
   static constexpr std::size_t kPayloadMax = 256;
 
