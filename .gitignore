@@ -6,3 +6,10 @@ contract*.xml
 .DS_Store
 .vscode/
 .idea/
+
+# ESP-IDF（ターゲット版）：生成した sdkconfig と、秘密を書く sdkconfig.defaults.local はコミットしない（#102）
+/firmware/sdkconfig
+/firmware/sdkconfig.old
+/firmware/sdkconfig.defaults.local
+/firmware/managed_components/
+/firmware/dependencies.lock

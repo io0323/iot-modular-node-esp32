@@ -1,0 +1,33 @@
+# 作品02（mcu-cpp-01）の接続の設定（open-questions #102・#103）。
+# 値は firmware/sdkconfig.defaults.local（コミットしない）に書き、SDKCONFIG_DEFAULTS で重ねる。
+menu "mcu-cpp-01 (portfolio 02)"
+
+    config NODE_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+
+    config NODE_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config NODE_MQTT_URL
+        string "MQTT broker URI (e.g. mqtt://192.168.1.10:1883)"
+        default ""
+
+    config NODE_MQTT_PASSWORD
+        string "MQTT password (user name is the device_id mcu-cpp-01)"
+        default ""
+
+    config NODE_SITE
+        string "Topic site (empty means home)"
+        default ""
+
+    config NODE_SNTP_SERVER1
+        string "1st SNTP server (empty means the MQTT broker host)"
+        default ""
+
+    config NODE_SNTP_SERVER2
+        string "2nd SNTP server"
+        default "pool.ntp.org"
+
+endmenu

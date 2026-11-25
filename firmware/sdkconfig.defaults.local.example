@@ -1,0 +1,9 @@
+# 見本（#102）。firmware/sdkconfig.defaults.local に写して値を入れる（sdkconfig.defaults.local はコミットしない）。
+CONFIG_NODE_WIFI_SSID="your-ssid"
+CONFIG_NODE_WIFI_PASSWORD="your-wifi-password"
+CONFIG_NODE_MQTT_URL="mqtt://192.168.1.10:1883"
+CONFIG_NODE_MQTT_PASSWORD="your-mqtt-password"
+CONFIG_NODE_SITE="home"
+# 空なら MQTT のブローカーと同じホスト（#103）
+CONFIG_NODE_SNTP_SERVER1=""
+CONFIG_NODE_SNTP_SERVER2="pool.ntp.org"

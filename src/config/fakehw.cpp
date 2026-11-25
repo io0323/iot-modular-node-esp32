@@ -2,22 +2,8 @@
 
 namespace node::config {
 
-using namespace std::chrono_literals;
-
 FakeHwRig::FakeHwRig(hal::ITimer& timer, hal::IMutex& i2c_mutex)
-    : bh1750_device_(timer),
-      bme280_(hal::I2cDevice{&bus_, &i2c_mutex, kAddrBme280}, timer, kBmeChannels, 2000ms),
-      bh1750_(hal::I2cDevice{&bus_, &i2c_mutex, kAddrBh1750}, timer, kLuxChannel, 1000ms),
-      soil_(adc_, kAdcSoil, kSoilCalibration, kSoilChannel, 10000ms),
-      fan_main_(pwm_, kPwmFanConfig, kFanMain),
-      led_grow_(pwm_, kPwmLedConfig, kLedGrow),
-      pump_(gpio_, kGpioPumpRelay, kPumpRelayActiveHigh, kPump),
-      buzzer_(pwm_, kPwmBuzzerConfig, kBuzzer),
-      display_(hal::I2cDevice{&bus_, &i2c_mutex, kAddrSsd1306}),
-      mode_button_(gpio_, kGpioButtonMode),
-      action_button_(gpio_, kGpioButtonAction),
-      sensors_{&bme280_, &bh1750_, &soil_},
-      actuators_{{{&fan_main_, fan_interlocks_}, {&led_grow_, {}}, {&pump_, pump_interlocks_}, {&buzzer_, {}}}} {
+    : bh1750_device_(timer), hw_(HwInterfaces{bus_, i2c_mutex, adc_, pwm_, gpio_, timer}) {
   (void)bus_.attach(kAddrBme280, bme280_device_);
   (void)bus_.attach(kAddrBh1750, bh1750_device_);
   (void)bus_.attach(kAddrSsd1306, ssd1306_device_);

@@ -1,0 +1,24 @@
+# 作品02 のターゲット版（ESP32-S3、ESP-IDF v5.5.6）の設定（open-questions #94〜#109・#113）。
+# 秘密（Wi-Fi・MQTT のパスワードなど）は sdkconfig.defaults.local（コミットしない）に書く。firmware/CMakeLists.txt が重ねる
+CONFIG_IDF_TARGET="esp32s3"
+
+# FreeRTOS の tick は 1000Hz（control の 10ms・ボタンの 20ms・ドライバの待ち時間を 1ms 単位で数える）
+CONFIG_FREERTOS_HZ=1000
+
+# タスクウォッチドッグ（FR-10・#98）：5秒、切れたらパニックで再起動する。割り込みのウォッチドッグは既定のまま
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_PANIC=y
+# パニックのときは再起動する（BOOT の reset_reason は watchdog・platform_reason は ESP_RST_TASK_WDT）
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# esp-mqtt（#104・#113）：内部のタスクを Wi-Fi と同じコア0に置く。優先度・再送の間隔・outbox の期限は既定
+CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
+CONFIG_MQTT_USE_CORE_0=y
+
+# SNTP（#103・#113）：サーバー2つ（MQTT のブローカーと同じホスト、pool.ntp.org）。再同期の間隔は既定（1時間）
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
+
+# ログ（#113）：既定の段階は INFO
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
