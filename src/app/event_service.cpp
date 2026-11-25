@@ -56,25 +56,26 @@ bool EventService::post(std::string_view code, Severity severity, std::string_vi
   return queue_.push_back(p);
 }
 
-support::Result<Publisher::Sent> EventService::send(Publisher& publisher, const Pending& p) {
-  if (p.built) {
-    return publisher.republish(infra::Kind::Event, p.message.view(), p.seq);
+void EventService::write_payload(const Pending& p, infra::JsonWriter& w) {
+  w.begin_object();
+  w.key("code").string(p.code.view());
+  w.key("severity").string(to_string(p.severity));
+  if (!p.channel.empty()) {
+    w.key("channel").string(p.channel.view());
   }
-  return publisher.publish(
-      infra::Kind::Event,
-      [&p](infra::JsonWriter& w) {
-        w.begin_object();
-        w.key("code").string(p.code.view());
-        w.key("severity").string(to_string(p.severity));
-        if (!p.channel.empty()) {
-          w.key("channel").string(p.channel.view());
-        }
-        if (!p.detail.empty()) {
-          w.key("detail").raw(p.detail.view());
-        }
-        w.end_object();
-      },
-      &p.stamp);
+  if (!p.detail.empty()) {
+    w.key("detail").raw(p.detail.view());
+  }
+  w.end_object();
+}
+
+support::Result<Publisher::Sent> EventService::send(Publisher& publisher, const Pending& p) {
+  const auto writer = [&p](infra::JsonWriter& w) { write_payload(p, w); };
+  if (p.sent) {
+    // 送った値から作り直す。payload は同じ値から同じ順で書くので、前の電文とバイト単位で同じになる（#71・#116）
+    return publisher.republish(infra::Kind::Event, writer, p.fields);
+  }
+  return publisher.publish(infra::Kind::Event, writer, &p.stamp);
 }
 
 void EventService::flush(Publisher& publisher) {
@@ -91,11 +92,8 @@ void EventService::flush(Publisher& publisher) {
       Inflight f{};
       f.token = r.value().token;
       f.item = p;
-      if (!p.built) {
-        f.item.built = true;
-        f.item.seq = r.value().seq;
-        (void)f.item.message.assign(publisher.last_message());
-      }
+      f.item.sent = true;
+      f.item.fields = r.value().fields;
       (void)inflight_.push_back(f);
     }
     queue_.erase_at(0);

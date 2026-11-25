@@ -28,6 +28,9 @@ class Publisher {
  public:
   static constexpr std::size_t kMessageMax = 2048;  ///< 電文の最大長
   static constexpr std::size_t kRetryCapacity = 8;  ///< 送り直し待ちの容量（#15）
+  /// 送り直し待ちの1件の大きさ。送り直し待ちに入るのは cmd_ack と state だけで、最悪の長さ（state で約 770 バイト、
+  /// cmd_ack で約 340 バイト）が収まる大きさ（P7 の決定 #116。publisher_test の RetrySlotFitsWorstCase で確かめる）
+  static constexpr std::size_t kRetryMessageMax = 1024;
 
   /// @brief 数えている件数（診断用）。
   struct Counters {
@@ -44,6 +47,7 @@ class Publisher {
   struct Sent {
     std::uint32_t token{0};  ///< QoS 1 のトークン（送り直し待ちに入れたときは 0）
     std::uint32_t seq{0};    ///< 付けた seq
+    infra::EnvelopeFields fields{};  ///< 送った電文のエンベロープの値（送り直しで同じ電文を作り直すのに使う）
   };
 
   /// @brief 窓口を作る。
@@ -68,27 +72,46 @@ class Publisher {
     }
     const infra::Stamp st = stamp ? *stamp : envelope_.now();
     infra::JsonWriter w(buf_);
-    envelope_.begin(w, kind, envelope_.peek_seq(kind), st);
+    const infra::EnvelopeFields fields = envelope_.begin(w, kind, envelope_.peek_seq(kind), st);
     write_payload(w);
     w.end_object();
     if (!w.ok()) {
       ++counters_.encode_errors;
       return support::make_error(support::ErrorCode::BufferFull, "message too large");
     }
-    built_len_ = w.view().size();
-    return send_built(kind, w.view(), envelope_.peek_seq(kind), true);
+    auto r = send_built(kind, w.view(), fields.seq, true);
+    if (r) {
+      r.value().fields = fields;
+    }
+    return r;
   }
 
-  /// @brief 組み立て済みの電文を、seq・ts を変えずに送り直す（確認が取れなかった event。#71）。
+  /// @brief 前に送った電文を、同じ msg_id・seq・ts のまま作り直して送る（確認が取れなかった event。#71・#116）。
+  /// payload を書く関数が同じ中身を書けば、前に送った電文とバイト単位で同じになる。seq のカウンタは進めない。
+  /// @tparam F void(infra::JsonWriter&) の形の関数オブジェクト
   /// @param kind 種類
-  /// @param message 組み立て済みの電文
-  /// @param seq 電文の seq（seq のカウンタは進めない）
+  /// @param write_payload payload を書く関数
+  /// @param fields 前に送った電文のエンベロープの値
   /// @return 送れたら成功。未接続なら NotConnected、上限で送れなければ Busy
-  support::Result<Sent> republish(infra::Kind kind, std::string_view message, std::uint32_t seq);
-
-  /// @brief 直前に publish で組み立てた電文（送り直しのために写しを取る）。
-  /// @return 電文（次の publish で書き換わる）
-  [[nodiscard]] std::string_view last_message() const { return {buf_.data(), built_len_}; }
+  template <typename F>
+  support::Result<Sent> republish(infra::Kind kind, const F& write_payload, const infra::EnvelopeFields& fields) {
+    if (!online()) {
+      return support::make_error(support::ErrorCode::NotConnected, "not connected");
+    }
+    infra::JsonWriter w(buf_);
+    envelope_.begin_same(w, kind, fields);
+    write_payload(w);
+    w.end_object();
+    if (!w.ok()) {
+      ++counters_.encode_errors;
+      return support::make_error(support::ErrorCode::BufferFull, "message too large");
+    }
+    auto r = send_built(kind, w.view(), fields.seq, false);
+    if (r) {
+      r.value().fields = fields;
+    }
+    return r;
+  }
 
   /// @brief seq を進めずに発行する（offline の state。共通仕様 v0.2.1 #29）。送信量の上限も数えない。
   /// @param kind 種類
@@ -118,7 +141,7 @@ class Publisher {
  private:
   struct Pending {
     infra::Kind kind{infra::Kind::State};
-    support::FixedString<kMessageMax> message;
+    support::FixedString<kRetryMessageMax> message;
   };
 
   support::Result<Sent> send_built(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit);
@@ -137,7 +160,6 @@ class Publisher {
   infra::ILogSink& log_;
   infra::RateLimiter limiter_{};
   std::array<char, kMessageMax> buf_{};
-  std::size_t built_len_{0};
   std::array<char, kMessageMax + 256> log_buf_{};
   support::StaticVector<Pending, kRetryCapacity> retries_{};
   Counters counters_{};

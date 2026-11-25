@@ -27,6 +27,11 @@ constexpr std::string_view to_string(RejectReason r) {
   return "";
 }
 
+/// @brief cmd/ack の payload の最大長。
+inline constexpr std::size_t kAckPayloadMax = 256;
+/// @brief cmd/ack の payload。
+using AckPayload = support::FixedString<kAckPayloadMax>;
+
 /// @brief cmd を処理した結果。
 struct CommandOutcome {
   /// @brief 結果の種類。
@@ -37,7 +42,7 @@ struct CommandOutcome {
   Kind kind{Kind::Discarded};  ///< 結果の種類
   infra::DiscardReason discard{infra::DiscardReason::NotJson};  ///< Discarded のときの理由
   bool duplicate{false};                                       ///< 重複した cmd_id（実行していない）
-  domain::CmdDedupCache::Payload ack_payload;                  ///< cmd/ack の payload（"{...}"）
+  AckPayload ack_payload;                                      ///< cmd/ack の payload（"{...}"）
   bool republish_state{false};                                 ///< state を出し直す（get_status）
   std::optional<ModeChange> mode_change;  ///< モードを切り替えた（MODE_CHANGED と state）
   ControlArbiter::InterlockChanges interlock_changes{};        ///< 指令で起きたインターロックの遷移

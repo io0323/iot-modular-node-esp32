@@ -14,20 +14,32 @@ namespace {
 
 constexpr bool invalid(FieldState s) { return s == FieldState::Invalid; }
 
-void write_ack(domain::CmdDedupCache::Payload& out, std::string_view cmd_id,
-               const std::optional<RejectReason>& reject, bool output, const ControlArbiter::CommandResult& r) {
-  std::array<char, domain::CmdDedupCache::kPayloadMax> buf{};
+/// ack の値（重複排除で覚える。#116）
+domain::AckRecord record_of(const std::optional<RejectReason>& reject, bool output,
+                            const ControlArbiter::CommandResult& r) {
+  domain::AckRecord a{};
+  a.rejected = reject.has_value();
+  a.reason = reject ? static_cast<std::uint8_t>(*reject) : std::uint8_t{0};
+  a.output = output;
+  a.limited = r.limited;
+  a.applied = r.applied;
+  return a;
+}
+
+/// ack の payload を値から書く（初めての ack も、重複した cmd_id への ack も同じ関数で書くので、payload は同じになる）
+void write_ack(AckPayload& out, std::string_view cmd_id, const domain::AckRecord& a) {
+  std::array<char, kAckPayloadMax> buf{};
   infra::JsonWriter w(buf);
   w.begin_object();
   w.key("cmd_id").string(cmd_id);
-  if (reject) {
+  if (a.rejected) {
     w.key("status").string("rejected");
-    w.key("reason").string(to_string(*reject));
+    w.key("reason").string(to_string(static_cast<RejectReason>(a.reason)));
   } else {
     w.key("status").string("done");
-    if (output) {
-      w.key("limited").boolean(r.limited);
-      w.key("applied").begin_object().key("level").uinteger(r.applied).end_object();
+    if (a.output) {
+      w.key("limited").boolean(a.limited);
+      w.key("applied").begin_object().key("level").uinteger(a.applied).end_object();
     }
     w.key("reason").null();
   }
@@ -50,13 +62,14 @@ CommandOutcome CommandService::handle(std::string_view json, std::uint64_t now_m
 
   if (const auto cached = cache_.find(req.cmd_id.view(), now_ms)) {
     out.duplicate = true;
-    out.ack_payload = *cached;
+    write_ack(out.ack_payload, req.cmd_id.view(), *cached);
     return out;
   }
 
   const Exec e = execute(req, now_ms, now_utc_ms, out);
-  write_ack(out.ack_payload, req.cmd_id.view(), e.reject, e.output, e.result);
-  (void)cache_.insert(req.cmd_id.view(), out.ack_payload.view(), now_ms);
+  const domain::AckRecord ack = record_of(e.reject, e.output, e.result);
+  write_ack(out.ack_payload, req.cmd_id.view(), ack);
+  (void)cache_.insert(req.cmd_id.view(), ack, now_ms);
   return out;
 }
 

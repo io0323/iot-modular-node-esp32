@@ -2,6 +2,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 #include "app/command_service.hpp"
 #include "config/devices.hpp"
@@ -194,6 +195,31 @@ TEST_F(CommandServiceTest, DuplicateOfRejectedIsRememberedToo) {
   const auto dup = run(make_cmd(ulid(42), "set_param", ""));
   EXPECT_TRUE(dup.duplicate);
   EXPECT_EQ(dup.ack_payload.view(), first.ack_payload.view());
+}
+
+// P7（#116）：重複排除は ack の値だけを覚え、payload を作り直す。どの形の ack も、前回とバイト単位で同じになる
+TEST_F(CommandServiceTest, RebuiltDuplicateAckIsByteIdenticalForEveryShape) {
+  const std::vector<std::string> cmds{
+      make_cmd(ulid(50), "set_actuator", R"({"id":"fan_main","level":600})", "auto", R"("lease_s":30)"),   // done・丸めなし
+      make_cmd(ulid(51), "set_actuator", R"({"id":"led_grow","level":900})"),                              // done・limited
+      make_cmd(ulid(52), "release", R"({"id":"fan_main"})"),                                               // done・出力あり
+      make_cmd(ulid(53), "set_mode", R"({"mode":"manual"})"),                                              // done・出力なし
+      make_cmd(ulid(54), "get_status", ""),                                                               // done・出力なし
+      make_cmd(ulid(55), "set_param", ""),                                                                // rejected・unknown_op
+      make_cmd(ulid(56), "set_actuator", R"({"id":"nothing","level":1})"),                                // rejected・unknown_target
+      make_cmd(ulid(57), "set_actuator", R"({"id":"fan_main","level":"x"})"),                             // rejected・invalid_arg
+      make_cmd(ulid(58), "get_status", "", "auto", R"("expires_at":"2000-01-01T00:00:00.000Z")"),         // rejected・expired
+  };
+  std::vector<std::string> first;
+  for (const auto& c : cmds) first.emplace_back(run(c).ack_payload.view());
+  for (std::size_t i = 0; i < cmds.size(); ++i) {
+    const auto dup = run(cmds[i]);
+    EXPECT_TRUE(dup.duplicate) << i;
+    EXPECT_EQ(std::string(dup.ack_payload.view()), first[i]) << i;
+  }
+  EXPECT_NE(first[1].find("\"limited\":true"), std::string::npos);
+  EXPECT_NE(first[6].find("unknown_target"), std::string::npos);
+  EXPECT_NE(first[8].find("expired"), std::string::npos);
 }
 
 TEST_F(CommandServiceTest, UnreadableMessagesAreDiscarded) {

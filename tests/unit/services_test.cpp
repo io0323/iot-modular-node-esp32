@@ -5,6 +5,8 @@
 #include <string>
 
 #include "app/publisher.hpp"
+#include "app/command_service.hpp"
+#include "config/devices.hpp"
 #include "app/state_service.hpp"
 #include "app/telemetry_service.hpp"
 #include "drivers/sim/sim_sensor.hpp"
@@ -156,6 +158,36 @@ TEST_F(ServicesTest, PublisherUncountedDoesNotAdvanceSeq) {
   ASSERT_TRUE(pub.publish_uncounted(infra::Kind::State, "{}"));
   EXPECT_EQ(env.peek_seq(infra::Kind::State), 0U);
   EXPECT_TRUE(link.published.back().retain);
+}
+
+TEST_F(ServicesTest, RetrySlotFitsWorstCaseStateAndCmdAck) {
+  // P7（#116）：送り直し待ちに入るのは cmd_ack と state だけ。どちらも最悪の長さで kRetryMessageMax に収まる
+  const domain::DeviceRegistry reg = config::devices();
+  ControlArbiter arb(reg.actuators(), store);
+  StateService state(reg.sensors(), arb, "0.1");
+  test::FakeClock far;
+  far.set(1000 + 0xFFFFFFFFULL);  // uptime_ms が10桁
+  test::FakeTimeSync late;
+  late.set_offset(253402300799000 - static_cast<std::int64_t>(far.monotonic_ms()));  // 9999-12-31T23:59:59.000Z
+  infra::EnvelopeFactory e("mcu-cpp-01", far, late, rng);
+  std::array<char, Publisher::kMessageMax> buf{};
+  for (const auto mode : {domain::Mode::Auto, domain::Mode::Manual, domain::Mode::PowerSave}) {
+    for (const bool online : {true, false}) {
+      infra::JsonWriter w(buf);
+      e.begin(w, infra::Kind::State, 0xFFFFFFFFU, infra::Stamp{1000 + 0xFFFFFFFFULL - 1});
+      state.write_payload(w, online, mode, 5);
+      w.end_object();
+      ASSERT_TRUE(w.ok());
+      EXPECT_LE(w.view().size(), Publisher::kRetryMessageMax) << static_cast<int>(mode);
+    }
+  }
+  // cmd_ack：payload は kAckPayloadMax 以下なので、エンベロープの最悪の長さと足して収まる
+  infra::JsonWriter w(buf);
+  e.begin(w, infra::Kind::CmdAck, 0xFFFFFFFFU, infra::Stamp{1000 + 0xFFFFFFFFULL - 1});
+  w.raw("{}");
+  w.end_object();
+  ASSERT_TRUE(w.ok());
+  EXPECT_LE(w.view().size() - 2 + kAckPayloadMax, Publisher::kRetryMessageMax);
 }
 
 // ---- TelemetryService
