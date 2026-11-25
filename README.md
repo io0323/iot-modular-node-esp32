@@ -92,7 +92,7 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 - 接続の情報は Kconfig の `NODE_WIFI_SSID`・`NODE_WIFI_PASSWORD`・`NODE_MQTT_URL`・`NODE_MQTT_PASSWORD`・`NODE_SITE`（既定は空）。`firmware/sdkconfig.defaults.local` があれば `sdkconfig.defaults` に重ねる（#102）
 - SNTP の1つ目は MQTT のブローカーと同じホスト、2つ目は `pool.ntp.org`（`NODE_SNTP_SERVER1`・`2` で変えられる。#103）
 - ピンの割り当て（仮、ESP32-S3-DevKitC-1）：I2C0 SDA GPIO8・SCL GPIO9、土壌水分 GPIO1（ADC1）、fan_main GPIO4・led_grow GPIO5・buzzer GPIO6（LEDC）、ポンプのリレー GPIO7、MODE ボタン GPIO10・ACTION ボタン GPIO11（`src/config/esp32_pins.hpp`。#105）
-- イメージの大きさ（P6）：全体 1,011,045 バイト、DIRAM 88.8%（[docs/quality.md](docs/quality.md)）
+- イメージの大きさ（P6）：全体 1,010,381 バイト、DIRAM 88.8%（[docs/quality.md](docs/quality.md)）
 
 | タスク | 優先度 | コア | 周期 | 呼ぶもの |
 |---|---|---|---|---|
