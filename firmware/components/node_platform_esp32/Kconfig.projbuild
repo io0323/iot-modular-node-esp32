@@ -48,6 +48,13 @@ menu "mcu-cpp-01 (portfolio 02)"
             waits for the SAR ADC forever in QEMU. With this option the ADC driver is not linked
             and the soil moisture sensor reports a read error (fault).
 
+    config NODE_TEST_FAKE_HW
+        bool "TEST: use the fake HAL and devices (same as the host build's --devices fakehw)"
+        default n
+        help
+            Only for the contract tests in QEMU, which emulates neither I2C nor the ADC.
+            The drivers run unchanged against fake I2C devices, ADC, PWM and GPIO.
+
     config NODE_TEST_HANG_TASK
         bool "TEST: stop feeding the task watchdog from the ui task after 10 s"
         default n

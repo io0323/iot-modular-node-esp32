@@ -39,7 +39,7 @@ struct Stamp {
 
 /// @brief 送った電文のエンベロープの値（送り直しで同じ電文を作り直すのに使う。P7 の決定 #116）。
 struct EnvelopeFields {
-  UlidString msg_id{};     ///< msg_id
+  UlidString msg_id;       ///< msg_id
   std::uint32_t seq{0};    ///< seq
   std::int64_t utc_ms{0};  ///< ts（UTC の ms）
   Stamp stamp{};           ///< 電文の時刻（uptime_ms を求める）

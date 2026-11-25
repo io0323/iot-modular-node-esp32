@@ -19,6 +19,10 @@
 #include "sdkconfig.h"
 #include "support/fixed_string.hpp"
 
+#if CONFIG_NODE_TEST_FAKE_HW
+#include "config/fakehw.hpp"
+#endif
+
 namespace node::platform::esp32 {
 
 namespace {
@@ -62,7 +66,12 @@ domain::DeviceRegistry init_devices() {
   if (!adc.init()) {
     ESP_LOGE(kTag, "adc init failed");
   }
+#if CONFIG_NODE_TEST_FAKE_HW
+  // 試験用（#132）：ドライバはそのままで、hal と機器をフェイクに替える（QEMU は I2C・ADC を再現しない）
+  static config::FakeHwRig rig(timer, i2c_mutex);
+#else
   static config::HwRig rig(config::HwInterfaces{i2c, i2c_mutex, adc, pwm, gpio, timer});
+#endif
   const domain::DeviceRegistry registry = rig.registry();
   for (const domain::ActuatorBinding& b : registry.actuators()) {
     if (!b.actuator->init()) {

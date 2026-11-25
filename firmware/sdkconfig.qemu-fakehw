@@ -1,0 +1,2 @@
+# 試験用（#132）：QEMU の構成に重ねて、hal をフェイク（config/fakehw。ホスト版の --devices fakehw と同じ機器と値）に替える
+CONFIG_NODE_TEST_FAKE_HW=y
