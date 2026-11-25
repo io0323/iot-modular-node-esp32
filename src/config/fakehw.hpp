@@ -16,6 +16,7 @@
 #include "drivers/button.hpp"
 #include "drivers/fake/fake_devices.hpp"
 #include "drivers/fake/fake_hal.hpp"
+#include "drivers/fake/fake_sht31.hpp"
 #include "drivers/soil_moisture.hpp"
 #include "drivers/ssd1306.hpp"
 

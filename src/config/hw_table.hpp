@@ -15,6 +15,7 @@
 NODE_SENSOR(drivers::Bme280, bme280, (i2c(hw, kAddrBme280), hw.timer), 2000, ({"temp_air", domain::Unit::DegC, 2000}, {"humidity", domain::Unit::PctRh, 2000}, {"pressure", domain::Unit::HPa, 2000}))
 NODE_SENSOR(drivers::Bh1750, bh1750, (i2c(hw, kAddrBh1750), hw.timer), 1000, ({"lux", domain::Unit::Lux, 1000}))
 NODE_SENSOR(drivers::SoilMoisture, soil, (hw.adc, kAdcSoil, kSoilCalibration), 10000, ({"soil", domain::Unit::Pct, 10000}))
+NODE_SENSOR(drivers::Sht31, sht31, (i2c(hw, drivers::Sht31::kAddrA), hw.timer), 2000, ({"temp_aux", domain::Unit::DegC, 2000}, {"humidity_aux", domain::Unit::PctRh, 2000}))
 
 // ---- アクチュエーター（telemetry の actuators[] はこの順）
 NODE_ACTUATOR(drivers::PwmActuator, fan_main, (hw.pwm, kPwmFanConfig), ("fan_main", 0, 1000, {}), fan_interlocks_)
