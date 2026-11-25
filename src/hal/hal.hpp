@@ -97,7 +97,9 @@ class I2cTransaction {
       : bus_(bus), mutex_(mutex), locked_(mutex.try_lock_for(lock_timeout_ms)) {}
   /// @brief 取っていれば放す。
   ~I2cTransaction() {
-    if (locked_) mutex_.unlock();
+    if (locked_) {
+      mutex_.unlock();
+    }
   }
   I2cTransaction(const I2cTransaction&) = delete;
   I2cTransaction& operator=(const I2cTransaction&) = delete;
@@ -110,18 +112,24 @@ class I2cTransaction {
   /// @brief 書いてから読む。
   support::Result<void> write_read(std::uint8_t addr, std::span<const std::uint8_t> tx, std::span<std::uint8_t> rx,
                                    std::uint32_t timeout_ms = kI2cTimeoutMs) {
-    if (!locked_) return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    if (!locked_) {
+      return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    }
     return bus_.write_read(addr, tx, rx, timeout_ms);
   }
   /// @brief 書く。
   support::Result<void> write(std::uint8_t addr, std::span<const std::uint8_t> tx,
                               std::uint32_t timeout_ms = kI2cTimeoutMs) {
-    if (!locked_) return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    if (!locked_) {
+      return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    }
     return bus_.write(addr, tx, timeout_ms);
   }
   /// @brief バスを回復させる。
   support::Result<void> recover() {
-    if (!locked_) return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    if (!locked_) {
+      return support::make_error(support::ErrorCode::Busy, "i2c bus lock timeout");
+    }
     return bus_.recover();
   }
 

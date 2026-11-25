@@ -53,7 +53,7 @@ class IActuator {
 /// @brief アクチュエーターと、それにかけるインターロックの組（構成表の1行）。
 struct ActuatorBinding {
   IActuator* actuator{nullptr};
-  std::span<IInterlock* const> interlocks{};
+  std::span<IInterlock* const> interlocks;
 };
 
 /// @brief 機器の一覧。インスタンスは静的に確保し、ここは参照だけを持つ（基本設計書 第5章）。

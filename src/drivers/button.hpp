@@ -26,10 +26,14 @@ class Button final : public domain::IButton {
 
   domain::ButtonEvent poll(std::uint64_t now_ms) override {
     const auto high = gpio_.read(pin_);
-    if (!high) return domain::ButtonEvent::None;  // 読めなければ判定を進めない
+    if (!high) {
+      return domain::ButtonEvent::None;  // 読めなければ判定を進めない
+    }
     const bool raw = high.value() != active_low_;  // 押されているか
     if (raw == candidate_) {
-      if (samples_ < kStableSamples) ++samples_;
+      if (samples_ < kStableSamples) {
+        ++samples_;
+      }
     } else {
       candidate_ = raw;
       samples_ = 1;

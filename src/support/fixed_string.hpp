@@ -26,8 +26,12 @@ class FixedString {
   /// @param s 足す文字列
   /// @return 容量を超えるなら false（中身は変えない）
   [[nodiscard]] bool append(std::string_view s) {
-    if (s.size() > N - size_) return false;
-    for (char c : s) buf_[size_++] = c;
+    if (s.size() > N - size_) {
+      return false;
+    }
+    for (char const c : s) {
+      buf_[size_++] = c;
+    }
     buf_[size_] = '\0';
     return true;
   }
@@ -36,7 +40,9 @@ class FixedString {
   /// @param c 足す文字
   /// @return 容量を超えるなら false
   [[nodiscard]] bool push_back(char c) {
-    if (size_ >= N) return false;
+    if (size_ >= N) {
+      return false;
+    }
     buf_[size_++] = c;
     buf_[size_] = '\0';
     return true;

@@ -37,7 +37,9 @@ class Tokens {
   [[nodiscard]] int skip(int i) const {
     int n = size(i);
     int j = i + 1;
-    while (n-- > 0 && j < count_) j = skip(j);
+    while (n-- > 0 && j < count_) {
+      j = skip(j);
+    }
     return j;
   }
 
@@ -46,32 +48,46 @@ class Tokens {
 
   /// 文字列で、エスケープを含まない（ID・列挙値の比較に使う）
   [[nodiscard]] std::optional<std::string_view> plain_string(int i) const {
-    if (!is_string(i)) return std::nullopt;
+    if (!is_string(i)) {
+      return std::nullopt;
+    }
     const std::string_view s = text(i);
-    if (s.find('\\') != std::string_view::npos) return std::nullopt;
+    if (s.find('\\') != std::string_view::npos) {
+      return std::nullopt;
+    }
     return s;
   }
 
   /// 整数（JSON Schema の integer：小数部がすべて0の数も整数とみなす。指数表記は扱わない）
   [[nodiscard]] std::optional<std::int64_t> integer(int i) const {
-    if (type(i) != JSMN_PRIMITIVE) return std::nullopt;
+    if (type(i) != JSMN_PRIMITIVE) {
+      return std::nullopt;
+    }
     std::string_view s = text(i);
     bool negative = false;
     if (!s.empty() && s[0] == '-') {
       negative = true;
       s.remove_prefix(1);
     }
-    if (s.empty() || s[0] < '0' || s[0] > '9') return std::nullopt;
+    if (s.empty() || s[0] < '0' || s[0] > '9') {
+      return std::nullopt;
+    }
     std::int64_t v = 0;
     std::size_t k = 0;
     for (; k < s.size() && s[k] >= '0' && s[k] <= '9'; ++k) {
-      if (v > (INT64_MAX - (s[k] - '0')) / 10) return std::nullopt;
+      if (v > (INT64_MAX - (s[k] - '0')) / 10) {
+        return std::nullopt;
+      }
       v = v * 10 + (s[k] - '0');
     }
     if (k < s.size()) {
-      if (s[k] != '.') return std::nullopt;
+      if (s[k] != '.') {
+        return std::nullopt;
+      }
       for (++k; k < s.size(); ++k) {
-        if (s[k] != '0') return std::nullopt;
+        if (s[k] != '0') {
+          return std::nullopt;
+        }
       }
     }
     return negative ? -v : v;
@@ -85,10 +101,14 @@ class Tokens {
 
 /// オブジェクト obj の中からキー name の値の位置を探す。なければ -1
 int find_key(const Tokens& t, int obj, std::string_view name) {
-  if (!t.is_object(obj)) return -1;
+  if (!t.is_object(obj)) {
+    return -1;
+  }
   int j = obj + 1;
   for (int n = t.size(obj); n > 0 && j < t.count(); --n) {
-    if (t.is_string(j) && t.text(j) == name && j + 1 < t.count()) return j + 1;
+    if (t.is_string(j) && t.text(j) == name && j + 1 < t.count()) {
+      return j + 1;
+    }
     j = t.skip(j);
   }
   return -1;
@@ -125,11 +145,21 @@ bool envelope_ok(const Tokens& t) {
 }
 
 OpKind op_of(std::string_view s) {
-  if (s == "set_actuator") return OpKind::SetActuator;
-  if (s == "release") return OpKind::Release;
-  if (s == "set_mode") return OpKind::SetMode;
-  if (s == "set_param") return OpKind::SetParam;
-  if (s == "get_status") return OpKind::GetStatus;
+  if (s == "set_actuator") {
+    return OpKind::SetActuator;
+  }
+  if (s == "release") {
+    return OpKind::Release;
+  }
+  if (s == "set_mode") {
+    return OpKind::SetMode;
+  }
+  if (s == "set_param") {
+    return OpKind::SetParam;
+  }
+  if (s == "get_status") {
+    return OpKind::GetStatus;
+  }
   return OpKind::Unknown;
 }
 
@@ -155,7 +185,9 @@ void read_args(const Tokens& t, int args, CmdRequest& req) {
 }
 
 bool origin_ok(const Tokens& t, int origin) {
-  if (!t.is_object(origin)) return false;
+  if (!t.is_object(origin)) {
+    return false;
+  }
   const int kind = find_key(t, origin, "kind");
   const int ref = find_key(t, origin, "ref");
   return (kind < 0 || t.is_string(kind)) && (ref < 0 || t.is_string(ref));
@@ -173,7 +205,9 @@ void read_payload(const Tokens& t, int payload, CmdRequest& req) {
     req.priority_state = p ? FieldState::Ok : FieldState::Invalid;
     req.priority = p.value_or(domain::Priority::Auto);
   }
-  if (const int args = find_key(t, payload, "args"); args >= 0) read_args(t, args, req);
+  if (const int args = find_key(t, payload, "args"); args >= 0) {
+    read_args(t, args, req);
+  }
   if (const int lease = find_key(t, payload, "lease_s"); lease >= 0) {
     const auto v = t.integer(lease);
     req.lease_state = v ? FieldState::Ok : FieldState::Invalid;

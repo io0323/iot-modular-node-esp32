@@ -21,7 +21,9 @@ HostTimeSync::HostTimeSync(std::uint32_t delay_ms)
 
 bool HostTimeSync::synced() const {
   // 一度同期したら、以後は同期済み（#67）
-  if (!synced_ && std::chrono::steady_clock::now() - started_ >= delay_) synced_ = true;
+  if (!synced_ && std::chrono::steady_clock::now() - started_ >= delay_) {
+    synced_ = true;
+  }
   return synced_;
 }
 
@@ -34,7 +36,9 @@ bool HostNetwork::in_down_window() const {
   const auto elapsed = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started_).count());
   for (const Window& w : down_) {
-    if (elapsed >= w.begin_ms && elapsed < w.end_ms) return true;
+    if (elapsed >= w.begin_ms && elapsed < w.end_ms) {
+      return true;
+    }
   }
   return false;
 }
@@ -52,7 +56,9 @@ infra::NetworkEvent HostNetwork::poll_event() {
   }
   if (pending_connect_) {
     pending_connect_ = false;
-    if (down) return infra::NetworkEvent::ConnectFailed;
+    if (down) {
+      return infra::NetworkEvent::ConnectFailed;
+    }
     up_ = true;
     return infra::NetworkEvent::Up;
   }

@@ -56,7 +56,7 @@ std::string env_or(const char* name, const char* fallback) {
 
 // "mqtt://host:port" または "host:port" を Paho の "tcp://host:port" にする
 std::string to_paho_uri(std::string_view s) {
-  for (std::string_view scheme : {"mqtt://", "tcp://"}) {
+  for (std::string_view const scheme : {"mqtt://", "tcp://"}) {
     if (s.substr(0, scheme.size()) == scheme) {
       s.remove_prefix(scheme.size());
       break;
@@ -131,7 +131,9 @@ class SimTarget final : public node::platform::IDebugTarget {
   }
   bool set_fault(std::string_view sensor_id, bool fault) override {
     node::drivers::SimSensor* s = node::config::sim_sensor_by_id(sensor_id);
-    if (s != nullptr) s->set_fault(fault);
+    if (s != nullptr) {
+      s->set_fault(fault);
+    }
     return s != nullptr;
   }
 };
@@ -176,12 +178,14 @@ class FakeHwTarget final : public node::platform::IDebugTarget {
 
 int main(int argc, char** argv) {
   Args args = parse_args(argc, argv);
-  if (!args.ok) return 2;
+  if (!args.ok) {
+    return 2;
+  }
 
   std::signal(SIGTERM, on_signal);
   std::signal(SIGINT, on_signal);
 
-  static node::platform::HostClock clock;
+  static node::platform::HostClock const clock;
   static node::platform::HostRandom rng;
   static node::infra::NullLogSink null_log;
   std::unique_ptr<node::platform::JsonlLogSink> file_log;
@@ -225,7 +229,7 @@ int main(int argc, char** argv) {
   }
 
   // Node は大きい（固定容量のバッファを持つ）のでスタックに置かない
-  static node::platform::HostTimeSync time_sync(args.sntp_delay_ms);
+  static node::platform::HostTimeSync const time_sync(args.sntp_delay_ms);
   static node::platform::HostNetwork network(args.net_down);
   static node::app::Node app(config, registry, link, network, time_sync, clock, rng, *log);
   if (auto r = app.start(); !r) {
@@ -241,7 +245,9 @@ int main(int argc, char** argv) {
     app.tick();
     next_tick += 10ms;
     const auto now = std::chrono::steady_clock::now();
-    if (next_tick < now) next_tick = now;
+    if (next_tick < now) {
+      next_tick = now;
+    }
     link.wait_for_activity(std::chrono::duration_cast<std::chrono::milliseconds>(next_tick - now));
   }
 

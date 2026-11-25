@@ -46,8 +46,8 @@ class RuleEngine {
  private:
   struct State {
     bool on{false};                                ///< ヒステリシスのルールが入っている
-    std::optional<std::uint64_t> pulse_start_ms{};  ///< 実行中のパルスの開始
-    std::optional<std::uint64_t> last_pulse_ms{};   ///< 最後にパルスを始めた時刻（クールダウン）
+    std::optional<std::uint64_t> pulse_start_ms;   ///< 実行中のパルスの開始
+    std::optional<std::uint64_t> last_pulse_ms;    ///< 最後にパルスを始めた時刻（クールダウン）
   };
 
   std::optional<domain::Level> step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,

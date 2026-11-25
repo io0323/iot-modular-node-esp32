@@ -51,7 +51,7 @@ class Bh1750 final : public domain::ISensor {
   support::Result<void> request_recovery() override;
 
  private:
-  support::Result<void> command(std::uint8_t opcode);
+  support::Result<void> command(std::uint8_t opcode) const;
 
   hal::I2cDevice dev_;
   hal::ITimer& timer_;

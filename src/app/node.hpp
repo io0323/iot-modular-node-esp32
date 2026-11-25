@@ -35,7 +35,7 @@ struct NodeConfig {
   std::string_view device_id{"mcu-cpp-01"};
   std::string_view site{infra::Topics::kDefaultSite};
   std::string_view username{"mcu-cpp-01"};  ///< MQTT のユーザー名は device_id と同じ（ACL が %u を使う）
-  std::string_view password{};
+  std::string_view password;
   std::string_view fw_version{"0.1"};
   std::string_view reset_reason{"power_on"};  ///< BOOT の detail.reset_reason
   std::string_view platform_reason{"HOST"};   ///< BOOT の detail.platform_reason
@@ -108,7 +108,7 @@ class Node {
   Publisher publisher_;
   domain::ReadingStore store_{};
   ControlArbiter arbiter_;
-  ModeManager modes_{};
+  ModeManager modes_;
   ManualControl manual_;
   RuleEngine rules_;
   SensorPoller poller_;

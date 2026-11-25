@@ -38,7 +38,7 @@ class UiService {
       : dev_(devices), modes_(modes), manual_(manual), arbiter_(arbiter), store_(store) {}
 
   /// @brief 機器を初期化する。
-  support::Result<void> init();
+  support::Result<void> init() const;
   /// @brief 10ms ごとに呼ぶ（ボタンは 20ms ごと、表示は1秒ごとに動く）。
   /// @param now_ms いまの時刻
   /// @param connected MQTT に接続しているか（1行目の表示）

@@ -21,7 +21,7 @@ bool build(Topics::TopicString& out, std::string_view site, std::string_view dev
 }  // namespace
 
 Topics::Topics(std::string_view site, std::string_view device_id) {
-  for (Kind k : {Kind::Telemetry, Kind::Event, Kind::State, Kind::CmdAck}) {
+  for (Kind const k : {Kind::Telemetry, Kind::Event, Kind::State, Kind::CmdAck}) {
     ok_ = build(topics_[index_of(k)], site, device_id, suffix_of(k)) && ok_;
   }
   ok_ = build(cmd_, site, device_id, "cmd") && ok_;

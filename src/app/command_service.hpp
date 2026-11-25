@@ -33,9 +33,9 @@ struct CommandOutcome {
   Kind kind{Kind::Discarded};
   infra::DiscardReason discard{infra::DiscardReason::NotJson};  ///< Discarded のときの理由
   bool duplicate{false};                                       ///< 重複した cmd_id（実行していない）
-  domain::CmdDedupCache::Payload ack_payload{};                ///< cmd/ack の payload（"{...}"）
+  domain::CmdDedupCache::Payload ack_payload;                  ///< cmd/ack の payload（"{...}"）
   bool republish_state{false};                                 ///< state を出し直す（get_status）
-  std::optional<ModeChange> mode_change{};                     ///< モードを切り替えた（MODE_CHANGED と state）
+  std::optional<ModeChange> mode_change;  ///< モードを切り替えた（MODE_CHANGED と state）
   ControlArbiter::InterlockChanges interlock_changes{};        ///< 指令で起きたインターロックの遷移
 };
 
@@ -59,7 +59,7 @@ class CommandService {
 
  private:
   struct Exec {
-    std::optional<RejectReason> reject{};
+    std::optional<RejectReason> reject;
     bool output{false};  ///< 出力を扱う op（applied・limited を付ける）
     ControlArbiter::CommandResult result{};
   };

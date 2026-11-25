@@ -99,7 +99,9 @@ CommandService::Exec CommandService::set_actuator(const infra::CmdRequest& req, 
   const bool level_ok = req.level_state == FieldState::Ok && req.level >= 0 && req.level <= domain::kLevelMax;
   // lease_s は set_actuator だけが持つ。付いていれば 1〜600 の整数であること（v0.2.1 #4・#13）
   std::optional<std::int64_t> lease_in{};
-  if (req.lease_state == FieldState::Ok) lease_in = req.lease_s;
+  if (req.lease_state == FieldState::Ok) {
+    lease_in = req.lease_s;
+  }
   const std::optional<std::uint32_t> lease_s =
       invalid(req.lease_state) ? std::nullopt : domain::Lease::resolve(lease_in);
   if (req.id_state != FieldState::Ok || !level_ok || !lease_s) {

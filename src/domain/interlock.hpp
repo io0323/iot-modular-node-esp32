@@ -18,8 +18,8 @@ struct InterlockInput {
 
 /// @brief インターロックの判定。強制値は上限より優先する（P2 の決定 #20）。
 struct InterlockVerdict {
-  std::optional<Level> force{};  ///< あれば、出力をこの値に固定する
-  std::optional<Level> upper{};  ///< あれば、出力をこの値より大きくしない
+  std::optional<Level> force;  ///< あれば、出力をこの値に固定する
+  std::optional<Level> upper;  ///< あれば、出力をこの値より大きくしない
 };
 
 /// @brief 安全インターロックの共通の契約（P2 の決定 #19）。構成表で対象のアクチュエーターに結び付ける。

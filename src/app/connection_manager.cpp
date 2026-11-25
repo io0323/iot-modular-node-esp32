@@ -10,7 +10,9 @@ void ConnectionManager::mqtt_down(std::uint64_t now_ms, bool failed_attempt, Act
   mqtt_ = MqttState::Idle;
   // 接続できなかったら間隔を2倍に。接続していた後に切れたら1秒から（接続できた時点で1秒に戻している）
   mqtt_retry_at_ms_ = now_ms + mqtt_backoff_.next();
-  if (was_connected) a.lost = true;
+  if (was_connected) {
+    a.lost = true;
+  }
   (void)failed_attempt;
 }
 
@@ -46,16 +48,22 @@ void ConnectionManager::handle_link_events(std::uint64_t now_ms, Actions& a) {
   for (LinkEvent ev = link_.poll_event(); ev != LinkEvent::None; ev = link_.poll_event()) {
     switch (ev) {
       case LinkEvent::Connected:
-        if (mqtt_ != MqttState::Connecting) break;  // 自分で切った後に届いた古い通知は無視する
+        if (mqtt_ != MqttState::Connecting) {
+          break;  // 自分で切った後に届いた古い通知は無視する
+        }
         mqtt_ = MqttState::Connected;
         mqtt_backoff_.reset();
         a.connected = true;
         break;
       case LinkEvent::ConnectFailed:
-        if (mqtt_ == MqttState::Connecting) mqtt_down(now_ms, true, a);
+        if (mqtt_ == MqttState::Connecting) {
+          mqtt_down(now_ms, true, a);
+        }
         break;
       case LinkEvent::Disconnected:
-        if (mqtt_ != MqttState::Idle) mqtt_down(now_ms, false, a);
+        if (mqtt_ != MqttState::Idle) {
+          mqtt_down(now_ms, false, a);
+        }
         break;
       case LinkEvent::None: break;
     }

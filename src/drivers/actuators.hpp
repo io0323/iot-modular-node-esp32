@@ -37,11 +37,15 @@ class PwmActuator final : public domain::IActuator {
 
   [[nodiscard]] std::string_view id() const override { return spec_.id; }
   support::Result<void> init() override {
-    if (auto r = pwm_.configure(config_.channel, config_.freq_hz, config_.resolution_bits); !r) return r;
+    if (auto r = pwm_.configure(config_.channel, config_.freq_hz, config_.resolution_bits); !r) {
+      return r;
+    }
     return apply(0);
   }
   support::Result<void> apply(domain::Level level) override {
-    if (auto r = pwm_.set_duty(config_.channel, level_to_duty(level, config_.resolution_bits)); !r) return r;
+    if (auto r = pwm_.set_duty(config_.channel, level_to_duty(level, config_.resolution_bits)); !r) {
+      return r;
+    }
     level_ = level;
     return support::ok();
   }
@@ -64,12 +68,16 @@ class RelayActuator final : public domain::IActuator {
 
   [[nodiscard]] std::string_view id() const override { return spec_.id; }
   support::Result<void> init() override {
-    if (auto r = gpio_.configure_output(pin_); !r) return r;
+    if (auto r = gpio_.configure_output(pin_); !r) {
+      return r;
+    }
     return apply(0);
   }
   support::Result<void> apply(domain::Level level) override {
     const bool on = level > 0;
-    if (auto r = gpio_.write(pin_, on == active_high_); !r) return r;
+    if (auto r = gpio_.write(pin_, on == active_high_); !r) {
+      return r;
+    }
     level_ = on ? domain::kLevelMax : domain::Level{0};
     return support::ok();
   }

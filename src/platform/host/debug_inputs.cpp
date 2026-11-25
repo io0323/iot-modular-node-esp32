@@ -9,17 +9,23 @@ namespace node::platform {
 namespace {
 
 std::optional<double> number(std::string_view s) {
-  if (s.empty()) return std::nullopt;
+  if (s.empty()) {
+    return std::nullopt;
+  }
   const std::string str(s);
   char* end = nullptr;
   const double v = std::strtod(str.c_str(), &end);
-  if (end != str.c_str() + str.size() || !std::isfinite(v)) return std::nullopt;
+  if (end != str.c_str() + str.size() || !std::isfinite(v)) {
+    return std::nullopt;
+  }
   return v;
 }
 
 std::optional<std::uint64_t> seconds_to_ms(std::string_view s) {
   const auto v = number(s);
-  if (!v || *v < 0) return std::nullopt;
+  if (!v || *v < 0) {
+    return std::nullopt;
+  }
   return static_cast<std::uint64_t>(std::llround(*v * 1000.0));
 }
 
@@ -27,22 +33,26 @@ std::optional<std::uint64_t> seconds_to_ms(std::string_view s) {
 bool split_at(std::string_view s, std::string_view& left, std::uint64_t& at_ms, bool at_required) {
   const std::size_t at = s.rfind('@');
   if (at == std::string_view::npos) {
-    if (at_required) return false;
+    if (at_required) {
+      return false;
+    }
     left = s;
     at_ms = 0;
     return true;
   }
   left = s.substr(0, at);
   const auto ms = seconds_to_ms(s.substr(at + 1));
-  if (!ms) return false;
+  if (!ms) {
+    return false;
+  }
   at_ms = *ms;
   return true;
 }
 
 void log_debug(infra::ILogSink& log, std::string_view what, std::string_view target, long long value,
                std::string_view result) {
-  std::string f = "{\"debug\":\"" + std::string(what) + "\",\"target\":\"" + std::string(target) +
-                  "\",\"value\":" + std::to_string(value) + ",\"result\":\"" + std::string(result) + "\"}";
+  std::string const f = R"({"debug":")" + std::string(what) + R"(","target":")" + std::string(target) +
+                        R"(","value":)" + std::to_string(value) + R"(,"result":")" + std::string(result) + "\"}";
   log.write("input", f);
 }
 
@@ -84,7 +94,9 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
       return true;
     }
     actions_.push_back({*start, Type::FaultOn, id, 0, false});
-    if (dash != std::string_view::npos) actions_.push_back({*end, Type::FaultOff, id, 0, false});
+    if (dash != std::string_view::npos) {
+      actions_.push_back({*end, Type::FaultOff, id, 0, false});
+    }
     return true;
   }
   if (option == "--press-at") {
@@ -117,7 +129,9 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
 
 void DebugInputs::apply_due(std::uint64_t elapsed_ms, app::Node& node, IDebugTarget& target, infra::ILogSink& log) {
   for (Action& a : actions_) {
-    if (a.done || elapsed_ms < a.at_ms) continue;
+    if (a.done || elapsed_ms < a.at_ms) {
+      continue;
+    }
     a.done = true;
     switch (a.type) {
       case Type::SetValue: {

@@ -55,15 +55,15 @@ struct Bme280Compensated {
 
 /// @brief 0x88〜0xA1（26 バイト）と 0xE1〜0xE7（7 バイト）から補正係数を読む（4.2.2 節 表16）。
 /// dig_H4・dig_H5 は 12 ビットの符号付き（表16）。上位の 8 ビット（0xE4・0xE6）を符号付きとして広げる。
-[[nodiscard]] Bme280Calibration parse_bme280_calibration(std::span<const std::uint8_t, 26> regs_88_a1,
-                                                         std::span<const std::uint8_t, 7> regs_e1_e7);
+[[nodiscard]] Bme280Calibration parse_bme280_calibration(std::span<const std::uint8_t, 26> c,
+                                                         std::span<const std::uint8_t, 7> h);
 
 /// @brief 0xF7〜0xFE（8 バイト）の burst read から生値を組み立てる（4 章、5.4.7〜5.4.9 節 表29〜31）。
-[[nodiscard]] Bme280Raw parse_bme280_raw(std::span<const std::uint8_t, 8> regs_f7_fe);
+[[nodiscard]] Bme280Raw parse_bme280_raw(std::span<const std::uint8_t, 8> d);
 
 /// @brief 4.2.3 節の整数の補正式（BME280_compensate_T_int32・BME280_compensate_P_int64・
 /// bme280_compensate_H_int32、コードの rev.1.1）で補正する。
-[[nodiscard]] Bme280Compensated compensate_bme280(const Bme280Calibration& cal, const Bme280Raw& raw);
+[[nodiscard]] Bme280Compensated compensate_bme280(const Bme280Calibration& k, const Bme280Raw& raw);
 
 /// @brief BME280 のドライバ。1台で temp_air・humidity・pressure の3チャネルを持つ。
 ///
@@ -115,8 +115,8 @@ class Bme280 final : public domain::ISensor {
   [[nodiscard]] const Bme280Calibration& calibration() const { return cal_; }
 
  private:
-  support::Result<void> write_reg(std::uint8_t reg, std::uint8_t value);
-  support::Result<void> read_regs(std::uint8_t reg, std::span<std::uint8_t> out);
+  support::Result<void> write_reg(std::uint8_t reg, std::uint8_t value) const;
+  support::Result<void> read_regs(std::uint8_t reg, std::span<std::uint8_t> out) const;
   support::Result<void> wait_status_clear(std::uint8_t mask);
 
   hal::I2cDevice dev_;

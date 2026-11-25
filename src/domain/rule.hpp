@@ -23,7 +23,7 @@ struct Rule {
   std::string_view channel;         ///< 入力
   Comparison enter{Comparison::Below};
   std::int32_t enter_milli{0};      ///< 入る条件のしきい値（1/1000 単位）
-  std::optional<std::int32_t> exit_milli{};  ///< 出る条件のしきい値（パルスのルールにはない）
+  std::optional<std::int32_t> exit_milli;  ///< 出る条件のしきい値（パルスのルールにはない）
   std::string_view actuator;        ///< 対象
   Level level{0};                   ///< 出す値
   std::uint32_t pulse_ms{0};        ///< パルスの長さ（0 ならヒステリシスのルール）
@@ -38,7 +38,9 @@ constexpr bool enters(const Rule& r, std::int32_t v) {
 
 /// @brief 出る条件が成り立つか（出る条件のないルールは常に false）。
 constexpr bool exits(const Rule& r, std::int32_t v) {
-  if (!r.exit_milli) return false;
+  if (!r.exit_milli) {
+    return false;
+  }
   return r.enter == Comparison::Below ? v >= *r.exit_milli : v < *r.exit_milli;
 }
 

@@ -17,8 +17,12 @@ class Lease {
   /// @param lease_s cmd の lease_s（省略なら std::nullopt）
   /// @return 省略なら60。1〜600 の外なら std::nullopt（invalid_arg）
   static std::optional<std::uint32_t> resolve(std::optional<std::int64_t> lease_s) {
-    if (!lease_s) return kDefaultS;
-    if (*lease_s < 1 || *lease_s > static_cast<std::int64_t>(kMaxS)) return std::nullopt;
+    if (!lease_s) {
+      return kDefaultS;
+    }
+    if (*lease_s < 1 || *lease_s > static_cast<std::int64_t>(kMaxS)) {
+      return std::nullopt;
+    }
     return static_cast<std::uint32_t>(*lease_s);
   }
 

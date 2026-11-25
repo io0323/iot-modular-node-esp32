@@ -70,14 +70,14 @@ class EventService {
  private:
   enum class Role : std::uint8_t { Normal, Boot, Lost, Restored };
   struct Pending {
-    support::FixedString<32> code{};
+    support::FixedString<32> code;
     Severity severity{Severity::Info};
-    support::FixedString<kDetailMax> detail{};
-    support::FixedString<32> channel{};
+    support::FixedString<kDetailMax> detail;
+    support::FixedString<32> channel;
     infra::Stamp stamp{};
     Role role{Role::Normal};
     bool built{false};  ///< 組み立て済み（送り直し。message と seq を変えない）
-    support::FixedString<kMessageMax> message{};
+    support::FixedString<kMessageMax> message;
     std::uint32_t seq{0};
   };
   struct Inflight {

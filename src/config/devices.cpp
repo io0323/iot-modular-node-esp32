@@ -66,11 +66,13 @@ const std::array<ActuatorBinding, 4> g_actuators{{
 
 }  // namespace
 
-domain::DeviceRegistry devices() { return domain::DeviceRegistry(g_sensors, g_actuators, kRules); }
+domain::DeviceRegistry devices() { return {g_sensors, g_actuators, kRules}; }
 
 drivers::SimSensor* sim_sensor_by_id(std::string_view id) {
   for (SimSensor* s : g_sim_sensors) {
-    if (s->id() == id) return s;
+    if (s->id() == id) {
+      return s;
+    }
   }
   return nullptr;
 }
@@ -78,7 +80,9 @@ drivers::SimSensor* sim_sensor_by_id(std::string_view id) {
 drivers::SimSensor* sim_sensor_by_channel(std::string_view channel) {
   for (SimSensor* s : g_sim_sensors) {
     for (const ChannelSpec& ch : s->channels()) {
-      if (ch.channel == channel) return s;
+      if (ch.channel == channel) {
+        return s;
+      }
     }
   }
   return nullptr;

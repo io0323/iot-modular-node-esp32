@@ -34,7 +34,7 @@ class Topics {
 
  private:
   std::array<TopicString, kKindCount> topics_{};
-  TopicString cmd_{};
+  TopicString cmd_;
   bool ok_{true};
 };
 

@@ -84,7 +84,7 @@ class EnvelopeFactory {
   const ITimeSync& sync_;
   IRandom& rng_;
   std::uint64_t boot_monotonic_ms_;
-  support::FixedString<8> boot_id_{};
+  support::FixedString<8> boot_id_;
   std::array<std::uint32_t, kKindCount> seq_{};
 };
 

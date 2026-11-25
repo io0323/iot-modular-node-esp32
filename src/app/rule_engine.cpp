@@ -10,7 +10,9 @@ RuleEngine::RuleEngine(std::span<const domain::Rule> rules)
 std::optional<domain::Level> RuleEngine::step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
                                               std::uint64_t now_ms, bool active) {
   // パルスは時刻で数え続ける。長さを過ぎたら終わり
-  if (st.pulse_start_ms && now_ms - *st.pulse_start_ms >= r.pulse_ms) st.pulse_start_ms.reset();
+  if (st.pulse_start_ms && now_ms - *st.pulse_start_ms >= r.pulse_ms) {
+    st.pulse_start_ms.reset();
+  }
 
   if (!value) {
     // 不明：提案を出さず、実行中のパルスも止める（クールダウンはパルスの開始から数え続ける）
@@ -48,7 +50,9 @@ void RuleEngine::evaluate(const domain::ReadingStore& store, std::uint64_t now_m
     const domain::Rule& r = rules_[i];
     const bool active = rules_enabled && (!r.lighting || lighting_enabled);
     const auto level = step(r, states_[i], store.good_value(r.channel, now_ms), now_ms, active);
-    if (!level) continue;
+    if (!level) {
+      continue;
+    }
     bool merged = false;
     for (Proposal& p : out) {
       if (p.actuator == r.actuator) {
@@ -56,7 +60,9 @@ void RuleEngine::evaluate(const domain::ReadingStore& store, std::uint64_t now_m
         merged = true;
       }
     }
-    if (!merged) (void)out.push_back(Proposal{r.actuator, *level});
+    if (!merged) {
+      (void)out.push_back(Proposal{r.actuator, *level});
+    }
   }
 }
 

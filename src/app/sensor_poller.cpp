@@ -28,7 +28,9 @@ void SensorPoller::start(std::uint64_t now_ms) {
 }
 
 void SensorPoller::set_period_factor(std::uint32_t factor) {
-  if (factor == 0 || factor == factor_) return;
+  if (factor == 0 || factor == factor_) {
+    return;
+  }
   factor_ = factor;
   register_periods();
   for (std::size_t i = 0; i < sensors_.size(); ++i) {
@@ -108,14 +110,18 @@ void SensorPoller::tick(std::uint64_t now_ms, Result& out) {
       tick_faulted(i, now_ms, out);
       continue;
     }
-    if (now_ms < st.next_due_ms) continue;
+    if (now_ms < st.next_due_ms) {
+      continue;
+    }
     advance_due(st, s, now_ms);
     // 読めなければその場で続けて読み直す。3回続けて失敗したら回復を1回だけ要求して故障にする（#55）
     bool ok = false;
     for (std::uint32_t attempt = 0; attempt < kAttemptsBeforeRecovery && !ok; ++attempt) {
       ok = read_into(s, now_ms, out);
     }
-    if (ok) continue;
+    if (ok) {
+      continue;
+    }
     ++recoveries_;
     (void)s.request_recovery();
     mark_faulted(i, now_ms, out);

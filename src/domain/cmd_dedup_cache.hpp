@@ -41,9 +41,9 @@ class CmdDedupCache {
 
  private:
   struct Entry {
-    support::FixedString<kCmdIdLen> cmd_id{};
+    support::FixedString<kCmdIdLen> cmd_id;
     std::uint64_t stored_ms{0};
-    Payload payload{};
+    Payload payload;
   };
   std::array<Entry, kCapacity> entries_{};
   std::size_t next_{0};   ///< 次に書く位置（最も古いもの）

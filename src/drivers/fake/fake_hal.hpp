@@ -48,9 +48,15 @@ class FakeI2cBus final : public hal::II2cBus {
   support::Result<void> write_read(std::uint8_t addr, std::span<const std::uint8_t> tx, std::span<std::uint8_t> rx,
                                    std::uint32_t timeout_ms) override {
     Entry* e = check(addr, timeout_ms);
-    if (e == nullptr) return support::make_error(support::ErrorCode::IoError, "i2c nack or timeout");
-    if (!tx.empty()) e->dev->on_write(tx);
-    if (!rx.empty()) e->dev->on_read(rx);
+    if (e == nullptr) {
+      return support::make_error(support::ErrorCode::IoError, "i2c nack or timeout");
+    }
+    if (!tx.empty()) {
+      e->dev->on_write(tx);
+    }
+    if (!rx.empty()) {
+      e->dev->on_read(rx);
+    }
     return support::ok();
   }
   support::Result<void> write(std::uint8_t addr, std::span<const std::uint8_t> tx,
@@ -73,20 +79,26 @@ class FakeI2cBus final : public hal::II2cBus {
 
   void set_flag(std::uint8_t addr, bool v, bool timeout) {
     for (Entry& e : devices_) {
-      if (e.addr != addr) continue;
+      if (e.addr != addr) {
+        continue;
+      }
       (timeout ? e.timeout : e.nack) = v;
     }
   }
   Entry* check(std::uint8_t addr, std::uint32_t timeout_ms) {
     ++transfers_;
     last_timeout_ms_ = timeout_ms;
-    if (hung_) return nullptr;
+    if (hung_) {
+      return nullptr;
+    }
     if (fail_next_ > 0) {
       --fail_next_;
       return nullptr;
     }
     for (Entry& e : devices_) {
-      if (e.addr == addr) return (e.nack || e.timeout) ? nullptr : &e;
+      if (e.addr == addr) {
+        return (e.nack || e.timeout) ? nullptr : &e;
+      }
     }
     return nullptr;  // つながっていないアドレスは NACK
   }
@@ -106,7 +118,9 @@ class FakeAdc final : public hal::IAdc {
   void set_raw(hal::Pin ch, std::uint16_t raw) { raw_[ch % kChannels] = raw; }
   void set_fault(bool fault) { fault_ = fault; }
   support::Result<std::uint16_t> read_raw(hal::Pin ch) override {
-    if (fault_) return support::make_error(support::ErrorCode::IoError, "adc fault");
+    if (fault_) {
+      return support::make_error(support::ErrorCode::IoError, "adc fault");
+    }
     return raw_[ch % kChannels];
   }
 
@@ -134,7 +148,9 @@ class FakePwm final : public hal::IPwm {
   }
   support::Result<void> set_duty(hal::Pin ch, std::uint32_t duty) override {
     Channel& c = ch_[ch % kChannels];
-    if (!c.configured) return support::make_error(support::ErrorCode::InvalidArgument, "pwm not configured");
+    if (!c.configured) {
+      return support::make_error(support::ErrorCode::InvalidArgument, "pwm not configured");
+    }
     c.duty = duty;
     return support::ok();
   }
@@ -161,7 +177,9 @@ class FakeGpio final : public hal::IGpio {
   }
   support::Result<bool> read(hal::Pin p) override { return pins_[p % kPins].level; }
   support::Result<void> write(hal::Pin p, bool high) override {
-    if (pins_[p % kPins].mode != Mode::Output) return support::make_error(support::ErrorCode::InvalidArgument);
+    if (pins_[p % kPins].mode != Mode::Output) {
+      return support::make_error(support::ErrorCode::InvalidArgument);
+    }
     pins_[p % kPins].level = high;
     ++pins_[p % kPins].writes;
     return support::ok();
@@ -185,7 +203,9 @@ class FakeMutex final : public hal::IMutex {
  public:
   bool try_lock_for(std::uint32_t timeout_ms) override {
     last_timeout_ms_ = timeout_ms;
-    if (locked_ || always_busy_) return false;
+    if (locked_ || always_busy_) {
+      return false;
+    }
     locked_ = true;
     return true;
   }

@@ -60,7 +60,9 @@ const ModeState& ModeManager::state_of(Mode m) {
 }
 
 std::optional<ModeChange> ModeManager::go(const ModeState& to, ModeCause cause, std::uint64_t now_ms) {
-  if (&to == state_) return std::nullopt;
+  if (&to == state_) {
+    return std::nullopt;
+  }
   const ModeChange c{state_->mode(), to.mode(), cause};
   state_ = &to;
   last_activity_ms_ = now_ms;  // 手動モードに入った時刻からも30分を数える
@@ -76,7 +78,9 @@ std::optional<ModeChange> ModeManager::request(Mode to, std::uint64_t now_ms) {
 }
 
 std::optional<ModeChange> ModeManager::tick(std::uint64_t now_ms) {
-  if (!state_->times_out() || now_ms - last_activity_ms_ < kManualTimeoutMs) return std::nullopt;
+  if (!state_->times_out() || now_ms - last_activity_ms_ < kManualTimeoutMs) {
+    return std::nullopt;
+  }
   return go(kAuto, ModeCause::Timeout, now_ms);
 }
 

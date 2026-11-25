@@ -61,7 +61,7 @@ class Ssd1306 final : public domain::IDisplay {
   [[nodiscard]] const std::array<std::uint8_t, kWidth * kPages>& framebuffer() const { return fb_; }
 
  private:
-  support::Result<void> commands(std::span<const std::uint8_t> cmds);
+  support::Result<void> commands(std::span<const std::uint8_t> cmds) const;
   support::Result<void> flush();
   void render(std::span<const std::string_view> lines);
 

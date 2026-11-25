@@ -3,7 +3,9 @@
 namespace node::app {
 
 void TelemetryService::publish(std::span<const domain::Reading> readings, Publisher& publisher) const {
-  if (readings.empty()) return;
+  if (readings.empty()) {
+    return;
+  }
   (void)publisher.publish(infra::Kind::Telemetry, [&](infra::JsonWriter& w) {
     w.begin_object();
     w.key("readings").begin_array();

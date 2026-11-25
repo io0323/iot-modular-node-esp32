@@ -83,14 +83,14 @@ class ControlArbiter {
  private:
   struct Slot {
     domain::IActuator* actuator{nullptr};
-    std::span<domain::IInterlock* const> interlocks{};
+    std::span<domain::IInterlock* const> interlocks;
     std::array<bool, kMaxInterlocksPerActuator> announced{};  ///< ACTIVE を出して、まだ RELEASED を出していない
     bool has_lease{false};
     domain::Level lease_level{0};
     domain::Priority priority{domain::Priority::Auto};
-    domain::Lease lease{};
-    std::optional<domain::Level> manual{};
-    std::optional<domain::Level> rule{};
+    domain::Lease lease;
+    std::optional<domain::Level> manual;
+    std::optional<domain::Level> rule;
     domain::Level output{0};
     domain::Owner owner{domain::Owner::None};
     std::uint64_t switched_at_ms{0};  ///< 最後に 0 と 0 より大きい値を切り替えた時刻（最小オン・オフ時間）

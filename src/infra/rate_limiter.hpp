@@ -22,7 +22,9 @@ class TokenBucket {
   /// @return 取れたら true
   [[nodiscard]] bool try_take(std::uint64_t now_ms) {
     refill(now_ms);
-    if (tokens_milli_ < 1000U) return false;
+    if (tokens_milli_ < 1000U) {
+      return false;
+    }
     tokens_milli_ -= 1000U;
     return true;
   }

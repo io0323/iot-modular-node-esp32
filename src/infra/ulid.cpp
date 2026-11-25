@@ -20,7 +20,7 @@ UlidString encode_ulid(std::uint64_t utc_ms, const std::array<std::uint8_t, 10>&
   std::uint32_t acc = 0;
   unsigned bits = 0;
   std::size_t pos = 10;
-  for (std::uint8_t byte : random) {
+  for (std::uint8_t const byte : random) {
     acc = (acc << 8U) | byte;
     bits += 8U;
     while (bits >= 5U) {

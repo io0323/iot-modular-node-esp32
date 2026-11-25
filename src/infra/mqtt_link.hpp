@@ -36,8 +36,8 @@ enum class LinkEvent : std::uint8_t { None, Connected, ConnectFailed, Disconnect
 struct InboundMessage {
   static constexpr std::size_t kTopicMax = 128;
   static constexpr std::size_t kPayloadMax = 2048;
-  support::FixedString<kTopicMax> topic{};
-  support::FixedString<kPayloadMax> payload{};
+  support::FixedString<kTopicMax> topic;
+  support::FixedString<kPayloadMax> payload;
 };
 
 /// @brief MQTT の接続（自作 MQTT アダプタの取り込み元が決まるまでの仮の抽象。open-questions #5）。

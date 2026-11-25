@@ -57,7 +57,9 @@ class Publisher {
   /// @return 送れた・送り直し待ちに入れたなら成功。未接続なら NotConnected、上限で送れなければ Busy
   template <typename F>
   support::Result<Sent> publish(infra::Kind kind, F&& write_payload, const infra::Stamp* stamp = nullptr) {
-    if (!online()) return support::make_error(support::ErrorCode::NotConnected, "not connected");
+    if (!online()) {
+      return support::make_error(support::ErrorCode::NotConnected, "not connected");
+    }
     const infra::Stamp st = stamp ? *stamp : envelope_.now();
     infra::JsonWriter w(buf_);
     envelope_.begin(w, kind, envelope_.peek_seq(kind), st);
@@ -96,7 +98,7 @@ class Publisher {
  private:
   struct Pending {
     infra::Kind kind{infra::Kind::State};
-    support::FixedString<kMessageMax> message{};
+    support::FixedString<kMessageMax> message;
   };
 
   support::Result<Sent> send_built(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit);

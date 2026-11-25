@@ -89,10 +89,18 @@ constexpr std::string_view to_string(Mode m) {
 /// @param s 文字列
 /// @return 共通仕様の4値のどれでもなければ std::nullopt
 constexpr std::optional<Priority> parse_priority(std::string_view s) {
-  if (s == "safety") return Priority::Safety;
-  if (s == "manual") return Priority::Manual;
-  if (s == "auto") return Priority::Auto;
-  if (s == "schedule") return Priority::Schedule;
+  if (s == "safety") {
+    return Priority::Safety;
+  }
+  if (s == "manual") {
+    return Priority::Manual;
+  }
+  if (s == "auto") {
+    return Priority::Auto;
+  }
+  if (s == "schedule") {
+    return Priority::Schedule;
+  }
   return std::nullopt;
 }
 
@@ -100,9 +108,15 @@ constexpr std::optional<Priority> parse_priority(std::string_view s) {
 /// @param s 文字列
 /// @return auto・manual・power_save のどれでもなければ std::nullopt
 constexpr std::optional<Mode> parse_mode(std::string_view s) {
-  if (s == "auto") return Mode::Auto;
-  if (s == "manual") return Mode::Manual;
-  if (s == "power_save") return Mode::PowerSave;
+  if (s == "auto") {
+    return Mode::Auto;
+  }
+  if (s == "manual") {
+    return Mode::Manual;
+  }
+  if (s == "power_save") {
+    return Mode::PowerSave;
+  }
   return std::nullopt;
 }
 

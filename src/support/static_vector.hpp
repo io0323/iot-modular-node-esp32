@@ -20,7 +20,9 @@ class StaticVector {
   /// @param value 足す値
   /// @return 容量がいっぱいで足せなければ false
   [[nodiscard]] bool push_back(const T& value) {
-    if (size_ >= N) return false;
+    if (size_ >= N) {
+      return false;
+    }
     data_[size_++] = value;
     return true;
   }
@@ -28,8 +30,12 @@ class StaticVector {
   /// @brief 指定した位置の要素を消し、後ろを詰める。
   /// @param index 位置（size() 未満）
   void erase_at(std::size_t index) {
-    if (index >= size_) return;
-    for (std::size_t i = index + 1; i < size_; ++i) data_[i - 1] = data_[i];
+    if (index >= size_) {
+      return;
+    }
+    for (std::size_t i = index + 1; i < size_; ++i) {
+      data_[i - 1] = data_[i];
+    }
     --size_;
   }
 
@@ -44,9 +50,9 @@ class StaticVector {
   T& operator[](std::size_t i) { return data_[i]; }
   const T& operator[](std::size_t i) const { return data_[i]; }
   T& front() { return data_[0]; }
-  const T& front() const { return data_[0]; }
+  [[nodiscard]] const T& front() const { return data_[0]; }
   T& back() { return data_[size_ - 1]; }
-  const T& back() const { return data_[size_ - 1]; }
+  [[nodiscard]] const T& back() const { return data_[size_ - 1]; }
 
   iterator begin() { return data_.data(); }
   iterator end() { return data_.data() + size_; }

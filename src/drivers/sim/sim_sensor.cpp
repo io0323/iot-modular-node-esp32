@@ -13,12 +13,16 @@ SimSensor::SimSensor(std::string_view id, std::span<const domain::ChannelSpec> c
 
 support::Result<void> SimSensor::init() {
   ++init_count_;
-  if (fault_) return support::make_error(support::ErrorCode::IoError, "sim sensor fault");
+  if (fault_) {
+    return support::make_error(support::ErrorCode::IoError, "sim sensor fault");
+  }
   return support::ok();
 }
 
 support::Result<std::size_t> SimSensor::read(std::span<domain::Reading> out) {
-  if (fault_) return support::make_error(support::ErrorCode::IoError, "sim sensor fault");
+  if (fault_) {
+    return support::make_error(support::ErrorCode::IoError, "sim sensor fault");
+  }
   if (fail_next_reads_ > 0) {
     --fail_next_reads_;
     return support::make_error(support::ErrorCode::IoError, "sim sensor transient fault");
@@ -43,7 +47,9 @@ bool SimSensor::set_channel_value(std::string_view channel, std::int32_t value_m
 }
 
 void SimSensor::set_value(std::size_t index, std::int32_t value_milli) {
-  if (index < values_.size()) values_[index] = value_milli;
+  if (index < values_.size()) {
+    values_[index] = value_milli;
+  }
 }
 
 }  // namespace node::drivers

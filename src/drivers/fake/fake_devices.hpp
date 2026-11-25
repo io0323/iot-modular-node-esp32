@@ -31,7 +31,7 @@ class FakeBme280Device final : public FakeI2cDevice {
   void on_write(std::span<const std::uint8_t> data) override;
   void on_read(std::span<std::uint8_t> out) override;
 
-  void set_calibration(const Bme280Calibration& cal);
+  void set_calibration(const Bme280Calibration& k);
   void set_raw(const Bme280Raw& raw) { raw_ = raw; }
   /// @brief 気温が temp_c になる adc_T を、データシート 8.1 節の倍精度の式で求めて設定する（いまの補正係数で）。
   void set_temperature_c(double temp_c);

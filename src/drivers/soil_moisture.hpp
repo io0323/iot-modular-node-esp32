@@ -25,13 +25,19 @@ struct SoilCalibration {
 [[nodiscard]] constexpr std::int32_t soil_raw_to_milli_pct(std::uint16_t raw, SoilCalibration cal) {
   const std::int64_t dry = cal.dry_raw;
   const std::int64_t wet = cal.wet_raw;
-  if (dry == wet) return 0;
+  if (dry == wet) {
+    return 0;
+  }
   const std::int64_t num = (dry - static_cast<std::int64_t>(raw)) * 100000;
   const std::int64_t den = dry - wet;
   // 符号を合わせて四捨五入する
   std::int64_t v = (num >= 0) == (den > 0) ? (num + den / 2) / den : (num - den / 2) / den;
-  if (v < 0) v = 0;
-  if (v > 100000) v = 100000;
+  if (v < 0) {
+    v = 0;
+  }
+  if (v > 100000) {
+    v = 100000;
+  }
   return static_cast<std::int32_t>(v);
 }
 
@@ -45,9 +51,13 @@ class SoilMoisture final : public domain::ISensor {
   [[nodiscard]] std::string_view id() const override { return "soil_moisture"; }
   support::Result<void> init() override { return support::ok(); }
   support::Result<std::size_t> read(std::span<domain::Reading> out) override {
-    if (out.empty()) return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");
+    if (out.empty()) {
+      return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");
+    }
     const auto raw = adc_.read_raw(adc_channel_);
-    if (!raw) return raw.error();
+    if (!raw) {
+      return raw.error();
+    }
     out[0] = domain::Reading{channel_[0].channel, soil_raw_to_milli_pct(raw.value(), cal_), channel_[0].unit,
                              domain::Quality::Good};
     return std::size_t{1};

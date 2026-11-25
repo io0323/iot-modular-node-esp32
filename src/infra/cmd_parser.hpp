@@ -20,7 +20,7 @@ enum class OpKind : std::uint8_t { SetActuator, Release, SetMode, SetParam, GetS
 
 /// @brief 読んだ cmd の payload。値の範囲（level の 0–1000 など）は CommandService が確かめる。
 struct CmdRequest {
-  support::FixedString<26> cmd_id{};
+  support::FixedString<26> cmd_id;
 
   FieldState op_state{FieldState::Absent};
   OpKind op{OpKind::Unknown};
@@ -30,11 +30,11 @@ struct CmdRequest {
 
   FieldState args_state{FieldState::Absent};   ///< args がオブジェクトか
   FieldState id_state{FieldState::Absent};     ///< args.id（snake_case の文字列）
-  support::FixedString<32> id{};
+  support::FixedString<32> id;
   FieldState level_state{FieldState::Absent};  ///< args.level（整数）
   std::int64_t level{0};
   FieldState mode_state{FieldState::Absent};   ///< args.mode（空でない文字列）
-  support::FixedString<32> mode{};
+  support::FixedString<32> mode;
 
   FieldState lease_state{FieldState::Absent};  ///< lease_s（整数）
   std::int64_t lease_s{0};

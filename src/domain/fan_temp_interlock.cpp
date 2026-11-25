@@ -12,7 +12,9 @@ InterlockVerdict FanTempInterlock::evaluate(const InterlockInput& in) {
       below_since_ms_.reset();
     }
   } else if (*value < config_.off_milli) {
-    if (!below_since_ms_) below_since_ms_ = in.now_ms;
+    if (!below_since_ms_) {
+      below_since_ms_ = in.now_ms;
+    }
     if (in.now_ms - *below_since_ms_ >= config_.hold_ms) {
       engaged_ = false;
       below_since_ms_.reset();
@@ -22,7 +24,9 @@ InterlockVerdict FanTempInterlock::evaluate(const InterlockInput& in) {
   }
 
   InterlockVerdict v{};
-  if (engaged_) v.force = config_.force;
+  if (engaged_) {
+    v.force = config_.force;
+  }
   return v;
 }
 

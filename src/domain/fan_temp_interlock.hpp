@@ -31,7 +31,7 @@ class FanTempInterlock final : public IInterlock {
  private:
   Config config_;
   bool engaged_{false};
-  std::optional<std::uint64_t> below_since_ms_{};
+  std::optional<std::uint64_t> below_since_ms_;
 };
 
 }  // namespace node::domain

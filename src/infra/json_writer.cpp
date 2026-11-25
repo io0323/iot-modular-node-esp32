@@ -3,7 +3,9 @@
 namespace node::infra {
 
 void JsonWriter::put(char c) {
-  if (!ok_) return;
+  if (!ok_) {
+    return;
+  }
   if (len_ >= buf_.size()) {
     ok_ = false;
     return;
@@ -12,7 +14,9 @@ void JsonWriter::put(char c) {
 }
 
 void JsonWriter::put(std::string_view s) {
-  for (char c : s) put(c);
+  for (char const c : s) {
+    put(c);
+  }
 }
 
 void JsonWriter::put_uint(std::uint64_t v) {
@@ -22,13 +26,15 @@ void JsonWriter::put_uint(std::uint64_t v) {
     tmp[n++] = static_cast<char>('0' + static_cast<int>(v % 10U));
     v /= 10U;
   } while (v != 0U);
-  while (n > 0) put(tmp[--n]);
+  while (n > 0) {
+    put(tmp[--n]);
+  }
 }
 
 void JsonWriter::put_escaped(std::string_view s) {
   static constexpr std::string_view kHex = "0123456789abcdef";
   put('"');
-  for (char c : s) {
+  for (char const c : s) {
     const auto u = static_cast<unsigned char>(c);
     switch (c) {
       case '"': put("\\\""); break;
@@ -57,7 +63,9 @@ void JsonWriter::before_value() {
     return;
   }
   if (depth_ > 0) {
-    if (!first_[depth_]) put(',');
+    if (!first_[depth_]) {
+      put(',');
+    }
     first_[depth_] = false;
   }
 }
@@ -164,8 +172,12 @@ JsonWriter& JsonWriter::fixed_milli(std::int32_t milli) {
     frac /= 10U;
   }
   std::size_t n = 3;
-  while (n > 1 && digits[n - 1] == '0') --n;
-  for (std::size_t i = 0; i < n; ++i) put(digits[i]);
+  while (n > 1 && digits[n - 1] == '0') {
+    --n;
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    put(digits[i]);
+  }
   return *this;
 }
 
