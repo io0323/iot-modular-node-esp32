@@ -12,25 +12,73 @@
 #include "infra/formats.hpp"
 #include "infra/log_sink.hpp"
 #include "infra/mqtt_link.hpp"
+#include "infra/network.hpp"
 #include "infra/random.hpp"
+#include "infra/time_sync.hpp"
 
 namespace node::test {
 
-/// 仮想時計。単調時計と UTC を同じだけ進める。
+/// 仮想の単調時計（1000ms から始まる）。
 class FakeClock final : public infra::IClock {
  public:
-  /// 既定の起点は 2026-11-20T06:00:12.345Z（共通仕様のサンプルの ts）
-  explicit FakeClock(std::int64_t utc_base_ms = *infra::parse_ts("2026-11-20T06:00:12.345Z"))
-      : utc_base_ms_(utc_base_ms) {}
   [[nodiscard]] std::uint64_t monotonic_ms() const override { return mono_ms_; }
-  [[nodiscard]] std::int64_t utc_ms() const override { return utc_base_ms_ + static_cast<std::int64_t>(mono_ms_); }
-  [[nodiscard]] bool synced() const override { return true; }
   void advance(std::uint64_t ms) { mono_ms_ += ms; }
   void set(std::uint64_t ms) { mono_ms_ = ms; }
 
  private:
-  std::int64_t utc_base_ms_;
   std::uint64_t mono_ms_{1000};
+};
+
+/// 仮想の時刻同期。UTC = 単調時計 + offset。既定は同期済みで、単調時計 0 が共通仕様のサンプルの ts
+/// 2026-11-20T06:00:12.345Z（FakeClock は 1000ms から始まるので、起動時は 06:00:13.345Z）。
+class FakeTimeSync final : public infra::ITimeSync {
+ public:
+  static constexpr std::int64_t kSampleTs = 1795154412345;  // 2026-11-20T06:00:12.345Z
+  [[nodiscard]] bool synced() const override { return synced_; }
+  [[nodiscard]] std::int64_t utc_offset_ms() const override { return offset_ms_; }
+  void set_synced(bool s) { synced_ = s; }
+  void set_offset(std::int64_t ms) { offset_ms_ = ms; }
+
+ private:
+  bool synced_{true};
+  std::int64_t offset_ms_{kSampleTs};
+};
+
+/// 仮想のネットワーク。connect() ですぐに Up（accept_connect が false なら ConnectFailed）。go_down / go_up で落とす・戻す。
+class FakeNetwork final : public infra::INetwork {
+ public:
+  support::Result<void> connect() override {
+    ++connects;
+    if (accept_connect) {
+      up_ = true;
+      events.push_back(infra::NetworkEvent::Up);
+    } else {
+      events.push_back(infra::NetworkEvent::ConnectFailed);
+    }
+    return support::ok();
+  }
+  [[nodiscard]] bool up() const override { return up_; }
+  infra::NetworkEvent poll_event() override {
+    if (events.empty()) return infra::NetworkEvent::None;
+    const auto e = events.front();
+    events.pop_front();
+    return e;
+  }
+  /// ネットワークが落ちたことにする（戻るまで connect は失敗する）
+  void go_down() {
+    up_ = false;
+    accept_connect = false;
+    events.push_back(infra::NetworkEvent::Down);
+  }
+  /// 次の connect から成功させる
+  void go_up() { accept_connect = true; }
+
+  bool accept_connect{true};
+  int connects{0};
+  std::deque<infra::NetworkEvent> events;
+
+ private:
+  bool up_{false};
 };
 
 /// 決まった並びの乱数（呼ぶたびに値が変わる）。
@@ -89,17 +137,32 @@ class FakeMqttLink final : public infra::IMqttLink {
     }
     return support::ok();
   }
-  void disconnect(std::uint32_t /*timeout_ms*/) override { connected_ = false; }
-  support::Result<void> publish(std::string_view topic, std::string_view payload, infra::Qos qos,
-                                bool retain) override {
+  void disconnect(std::uint32_t /*timeout_ms*/) override {
+    connected_ = false;
+    held_.clear();  // clean session：確認待ちは捨てる
+    ++disconnects;
+  }
+  support::Result<std::uint32_t> publish(std::string_view topic, std::string_view payload, infra::Qos qos,
+                                         bool retain) override {
     if (!connected_) return support::make_error(support::ErrorCode::NotConnected);
+    std::uint32_t token = 0;
     if (qos == infra::Qos::AtLeastOnce) {
-      if (inflight_ >= kMaxInflight) return support::make_error(support::ErrorCode::Busy);
-      ++inflight_;
-      if (auto_puback) inflight_ = 0;
+      if (held_.size() >= kMaxInflight) return support::make_error(support::ErrorCode::Busy);
+      token = next_token_++;
+      if (auto_puback) {
+        delivered_.push_back(token);
+      } else {
+        held_.push_back(token);
+      }
     }
     published.push_back({std::string(topic), std::string(payload), qos, retain});
-    return support::ok();
+    return token;
+  }
+  bool poll_delivery(std::uint32_t& token) override {
+    if (delivered_.empty()) return false;
+    token = delivered_.front();
+    delivered_.pop_front();
+    return true;
   }
   support::Result<void> subscribe(std::string_view topic, infra::Qos /*qos*/) override {
     subscriptions.emplace_back(topic);
@@ -119,15 +182,19 @@ class FakeMqttLink final : public infra::IMqttLink {
     return e;
   }
   [[nodiscard]] bool connected() const override { return connected_; }
-  [[nodiscard]] std::size_t inflight() const override { return inflight_; }
+  [[nodiscard]] std::size_t inflight() const override { return held_.size(); }
 
-  /// 接続が切れたことにする
+  /// 接続が切れたことにする（確認待ちの電文は届かなかった扱い）
   void drop() {
     connected_ = false;
-    inflight_ = 0;
+    held_.clear();
     events.push_back(infra::LinkEvent::Disconnected);
   }
-  void puback_all() { inflight_ = 0; }
+  /// 確認待ちの電文すべてに PUBACK が来たことにする
+  void puback_all() {
+    for (const auto t : held_) delivered_.push_back(t);
+    held_.clear();
+  }
   void set_connected(bool c) { connected_ = c; }
 
   /// topic の末尾（"telemetry" など）で絞り込む
@@ -143,6 +210,7 @@ class FakeMqttLink final : public infra::IMqttLink {
 
   bool accept_connect{true};
   bool auto_puback{true};
+  int disconnects{0};
   std::vector<Connect> connects;
   std::vector<Published> published;
   std::vector<std::string> subscriptions;
@@ -151,7 +219,9 @@ class FakeMqttLink final : public infra::IMqttLink {
 
  private:
   bool connected_{false};
-  std::size_t inflight_{0};
+  std::uint32_t next_token_{1};
+  std::deque<std::uint32_t> held_;
+  std::deque<std::uint32_t> delivered_;
 };
 
 // ---- 電文を読む小さな道具（JsonWriter の出力は空白を含まないので、文字列の検索で足りる）

@@ -4,7 +4,6 @@
 #include <chrono>
 #include <string>
 
-#include "app/event_service.hpp"
 #include "app/publisher.hpp"
 #include "app/state_service.hpp"
 #include "app/telemetry_service.hpp"
@@ -31,10 +30,11 @@ constexpr ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{30}};
 class ServicesTest : public ::testing::Test {
  protected:
   test::FakeClock clock;
+  test::FakeTimeSync sync;
   test::FakeRandom rng;
   test::FakeMqttLink link;
   test::CapturingLog log;
-  infra::EnvelopeFactory env{"mcu-cpp-01", clock, rng};
+  infra::EnvelopeFactory env{"mcu-cpp-01", clock, sync, rng};
   infra::Topics topics{"home", "mcu-cpp-01"};
   Publisher pub{link, env, topics, clock, log};
 
@@ -80,14 +80,55 @@ TEST_F(ServicesTest, PublisherDropsTelemetryOverRateButQueuesOthers) {
   EXPECT_EQ(env.peek_seq(infra::Kind::Telemetry), 50U);  // 捨てた分は seq を使わない
 
   for (int i = 0; i < 52; ++i) {
-    ASSERT_TRUE(pub.publish(infra::Kind::Event, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
+    ASSERT_TRUE(pub.publish(infra::Kind::CmdAck, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
   }
-  EXPECT_EQ(link.on("event").size(), 50U);
+  EXPECT_EQ(link.on("cmd/ack").size(), 50U);
   EXPECT_EQ(pub.retry_pending(), 2U);
+  EXPECT_EQ(env.peek_seq(infra::Kind::CmdAck), 52U);  // 送り直し待ちに入れた分も seq は決まっている
   clock.advance(1000);
   pub.flush_retries();
-  EXPECT_EQ(link.on("event").size(), 52U);
+  EXPECT_EQ(link.on("cmd/ack").size(), 52U);
   EXPECT_EQ(pub.retry_pending(), 0U);
+  EXPECT_EQ(json_value(link.on("cmd/ack").back().payload, "seq"), "51");
+}
+
+TEST_F(ServicesTest, PublisherDefersEventOverRateWithoutUsingSeq) {
+  for (int i = 0; i < 50; ++i) {
+    ASSERT_TRUE(pub.publish(infra::Kind::Event, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
+  }
+  const auto r = pub.publish(infra::Kind::Event, [](infra::JsonWriter& w) { w.begin_object().end_object(); });
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error().code, support::ErrorCode::Busy);  // event は EventService の保持に残る（#15）
+  EXPECT_EQ(env.peek_seq(infra::Kind::Event), 50U);
+  EXPECT_EQ(pub.counters().event_deferred, 1U);
+  EXPECT_EQ(pub.retry_pending(), 0U);
+}
+
+TEST_F(ServicesTest, PublisherRetryQueueOverflowDropsAndCounts) {
+  for (int i = 0; i < 50; ++i) {
+    ASSERT_TRUE(pub.publish(infra::Kind::CmdAck, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
+  }
+  for (std::size_t i = 0; i < Publisher::kRetryCapacity - 1; ++i) {
+    ASSERT_TRUE(pub.publish(infra::Kind::CmdAck, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
+  }
+  // state も同じ送り直し待ちに並ぶ
+  ASSERT_TRUE(pub.publish(infra::Kind::State, [](infra::JsonWriter& w) { w.begin_object().end_object(); }));
+  EXPECT_EQ(pub.retry_pending(), Publisher::kRetryCapacity);
+  const auto r = pub.publish(infra::Kind::CmdAck, [](infra::JsonWriter& w) { w.begin_object().end_object(); });
+  ASSERT_FALSE(r);
+  EXPECT_EQ(r.error().code, support::ErrorCode::BufferFull);
+  EXPECT_EQ(pub.counters().retry_overflow, 1U);
+  EXPECT_EQ(env.peek_seq(infra::Kind::CmdAck), 57U);  // 捨てた分は seq を使わない
+}
+
+TEST_F(ServicesTest, PublisherReturnsTokenForQos1AndZeroForQos0) {
+  const auto a = pub.publish(infra::Kind::Event, [](infra::JsonWriter& w) { w.begin_object().end_object(); });
+  ASSERT_TRUE(a);
+  EXPECT_NE(a.value().token, 0U);
+  EXPECT_EQ(a.value().seq, 0U);
+  const auto t = pub.publish(infra::Kind::Telemetry, [](infra::JsonWriter& w) { w.begin_object().end_object(); });
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t.value().token, 0U);
 }
 
 TEST_F(ServicesTest, PublisherQueuesWhenInflightIsFull) {
@@ -176,51 +217,7 @@ TEST_F(ServicesTest, StatePayloadHasChannelsActuatorsAndFw) {
   EXPECT_NE(w2.view().find(R"({"channel":"soil","unit":"pct","period_ms":50000})"), std::string::npos);
 }
 
-// ---- EventService
-
-TEST_F(ServicesTest, EventsQueueWhileDisconnectedAndFlushInOrder) {
-  EventService ev;
-  link.set_connected(false);
-  const infra::Stamp boot_stamp = env.now();
-  ASSERT_TRUE(ev.post("BOOT", Severity::Info, R"({"reset_reason":"power_on"})", boot_stamp));
-  clock.advance(500);
-  ASSERT_TRUE(ev.post("MODE_CHANGED", Severity::Info, "", env.now()));
-  ev.flush(pub);
-  EXPECT_EQ(ev.pending(), 2U);
-  EXPECT_TRUE(link.published.empty());
-
-  link.set_connected(true);
-  clock.advance(5000);
-  ev.flush(pub);
-  EXPECT_EQ(ev.pending(), 0U);
-  const auto sent = link.on("event");
-  ASSERT_EQ(sent.size(), 2U);
-  EXPECT_EQ(json_value(sent[0].payload, "code"), "BOOT");
-  EXPECT_EQ(json_value(sent[0].payload, "severity"), "info");
-  EXPECT_EQ(json_value(sent[0].payload, "reset_reason"), "power_on");
-  EXPECT_EQ(json_value(sent[0].payload, "ts"), "2026-11-20T06:00:13.345Z");  // 発生時刻
-  EXPECT_EQ(json_value(sent[1].payload, "code"), "MODE_CHANGED");
-  EXPECT_EQ(sent[1].payload.find("detail"), std::string::npos);
-}
-
-TEST_F(ServicesTest, EventChannelIsWrittenWhenGiven) {
-  EventService ev;
-  ASSERT_TRUE(ev.post("SENSOR_FAULT", Severity::Critical, "", env.now(), "temp_air"));
-  ev.flush(pub);
-  const std::string p = payload_of(link.on("event").back().payload);
-  EXPECT_EQ(p, R"({"code":"SENSOR_FAULT","severity":"critical","channel":"temp_air"})");
-}
-
-TEST_F(ServicesTest, EventsOverflowDropsNewest) {
-  EventService ev;
-  for (std::size_t i = 0; i < EventService::kCapacity; ++i) {
-    ASSERT_TRUE(ev.post("X", Severity::Info, "", env.now()));
-  }
-  EXPECT_FALSE(ev.post("Y", Severity::Info, "", env.now()));
-  EXPECT_EQ(ev.dropped(), 1U);
-  EXPECT_EQ(ev.pending(), EventService::kCapacity);
-  EXPECT_EQ(to_string(Severity::Warning), "warning");
-}
+// EventService は event_service_test.cpp
 
 }  // namespace
 }  // namespace node::app

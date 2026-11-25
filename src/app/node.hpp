@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "app/command_service.hpp"
+#include "app/connection_manager.hpp"
 #include "app/control_arbiter.hpp"
 #include "app/event_service.hpp"
 #include "app/manual_control.hpp"
@@ -22,7 +23,9 @@
 #include "infra/envelope.hpp"
 #include "infra/log_sink.hpp"
 #include "infra/mqtt_link.hpp"
+#include "infra/network.hpp"
 #include "infra/random.hpp"
+#include "infra/time_sync.hpp"
 #include "infra/topic.hpp"
 
 namespace node::app {
@@ -37,20 +40,19 @@ struct NodeConfig {
   std::string_view reset_reason{"power_on"};  ///< BOOT の detail.reset_reason
   std::string_view platform_reason{"HOST"};   ///< BOOT の detail.platform_reason
   std::uint16_t keepalive_s{10};
-  std::uint32_t reconnect_interval_ms{1000};  ///< 仮版：1秒ごとの単純な再試行（P4 で指数バックオフ）
   std::uint32_t diag_interval_ms{10000};
 };
 
 /// @brief 作品02のアプリ全体。サービスを組み立て、tick で1周ずつ動かす。アプリのロジックは1つのスレッドだけで動かす。
 ///
-/// tick の順番：接続状態 → 計測（SensorPoller）→ 手動モードのタイムアウト → 受信した cmd → ローカルルール
-/// → 調停（ControlArbiter）→ telemetry → 再送待ちとイベントの送信。
+/// tick の順番：接続（ConnectionManager）→ 計測（SensorPoller）→ 手動モードのタイムアウト → ボタン → 受信した cmd
+/// → ローカルルール → 調停（ControlArbiter）→ telemetry → 送り直し待ちとイベントの送信。
 class Node {
  public:
   static constexpr std::size_t kMaxInboundPerTick = 16;
 
-  Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link,
-       const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log);
+  Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link, infra::INetwork& network,
+       const infra::ITimeSync& sync, const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log);
 
   /// @brief 機器を初期化し、BOOT をためる。
   support::Result<void> start();
@@ -73,15 +75,16 @@ class Node {
     return discards_[static_cast<std::size_t>(r)];
   }
   [[nodiscard]] std::size_t pending_events() const { return events_.pending(); }
+  [[nodiscard]] const EventService& events() const { return events_; }
+  [[nodiscard]] const ConnectionManager& connection() const { return connection_; }
   [[nodiscard]] const UiService& ui() const { return ui_; }
   [[nodiscard]] const ManualControl& manual() const { return manual_; }
 
  private:
-  enum class LinkState : std::uint8_t { Disconnected, Connecting, Connected };
-
-  void handle_link_events(std::uint64_t now);
+  void handle_connection(std::uint64_t now);
   void try_connect(std::uint64_t now);
-  void on_connected();
+  void on_connected(std::uint64_t now);
+  void on_lost(std::uint64_t now);
   void handle_inbound(std::uint64_t now);
   void apply_outcome(const CommandOutcome& outcome);
   void on_mode_change(const ModeChange& change);
@@ -114,10 +117,10 @@ class Node {
   StateService state_;
   TelemetryService telemetry_;
   UiService ui_;
+  ConnectionManager connection_;
 
-  LinkState link_state_{LinkState::Disconnected};
-  std::uint64_t next_connect_ms_{0};
   std::uint64_t next_diag_ms_{0};
+  bool reported_pre_connect_drops_{false};
   SensorPoller::Result poll_{};
   RuleEngine::Proposals proposals_{};
   std::array<char, Publisher::kMessageMax> will_buf_{};

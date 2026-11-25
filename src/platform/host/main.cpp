@@ -5,6 +5,7 @@
 //
 // デバッグ入力（P2。省略時は P1 と同じ動き）：--sim <channel>=<value>[@<秒>]、--sim-fault <センサーID>@<開始秒>[-<終了秒>]、
 // --press-at <秒>、--manual <id>=<level>@<秒>（debug_inputs.hpp）
+// 接続のデバッグ入力（P4）：--sntp-delay <秒>（起動から指定秒は同期前）、--net-down <開始秒>-<終了秒>（複数指定可）
 //
 // ブローカーは --broker、なければ IOTSPEC_MQTT_URL（既定 mqtt://localhost:1883）。
 // パスワードは IOTSPEC_MQTT_PASSWORD（既定 iotspec-dev）。BOOT の reset_reason は MCU_CPP_01_RESET_REASON（既定 power_on）。
@@ -17,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "app/node.hpp"
 #include "config/devices.hpp"
@@ -41,6 +43,8 @@ struct Args {
   std::string site{"home"};
   std::string log_path;
   bool fakehw{false};
+  std::uint32_t sntp_delay_ms{0};
+  std::vector<node::platform::HostNetwork::Window> net_down;
   node::platform::DebugInputs debug;
   bool ok{true};
 };
@@ -73,6 +77,25 @@ Args parse_args(int argc, char** argv) {
       a.site = argv[++i];
     } else if (arg == "--log" && has_value) {
       a.log_path = argv[++i];
+    } else if (arg == "--sntp-delay" && has_value) {
+      const double v = std::strtod(argv[++i], nullptr);
+      if (v < 0) {
+        std::fprintf(stderr, "--sntp-delay <秒>\n");
+        a.ok = false;
+      }
+      a.sntp_delay_ms = static_cast<std::uint32_t>(std::llround(v * 1000.0));
+    } else if (arg == "--net-down" && has_value) {
+      const std::string_view v = argv[++i];
+      const std::size_t dash = v.find('-');
+      const double b = std::strtod(std::string(v.substr(0, dash)).c_str(), nullptr);
+      const double e = dash == std::string_view::npos ? -1 : std::strtod(std::string(v.substr(dash + 1)).c_str(), nullptr);
+      if (dash == std::string_view::npos || b < 0 || e <= b) {
+        std::fprintf(stderr, "--net-down <開始秒>-<終了秒>\n");
+        a.ok = false;
+      } else {
+        a.net_down.push_back({static_cast<std::uint64_t>(std::llround(b * 1000.0)),
+                              static_cast<std::uint64_t>(std::llround(e * 1000.0))});
+      }
     } else if (arg == "--devices" && has_value) {
       const std::string_view v = argv[++i];
       if (v == "fakehw") {
@@ -91,7 +114,8 @@ Args parse_args(int argc, char** argv) {
       std::fprintf(stderr,
                    "usage: mcu_cpp_01 [--broker host:port] [--site <site>] [--log <file.jsonl>] [--devices sim|fakehw]\n"
                    "  [--sim <channel>=<value>[@<sec>]] [--sim-fault <sensor>@<start>[-<end>]]\n"
-                   "  [--press-at <sec>] [--manual <id>=<level>@<sec>]\n");
+                   "  [--press-at <sec>] [--manual <id>=<level>@<sec>]\n"
+                   "  [--sntp-delay <sec>] [--net-down <start>-<end>]\n");
       a.ok = false;
     }
   }
@@ -163,7 +187,7 @@ int main(int argc, char** argv) {
   std::unique_ptr<node::platform::JsonlLogSink> file_log;
   node::infra::ILogSink* log = &null_log;
   if (!args.log_path.empty()) {
-    file_log = std::make_unique<node::platform::JsonlLogSink>(clock, args.log_path);
+    file_log = std::make_unique<node::platform::JsonlLogSink>(args.log_path);
     if (!file_log->ok()) {
       std::fprintf(stderr, "cannot open log file: %s\n", args.log_path.c_str());
       return 2;
@@ -201,7 +225,9 @@ int main(int argc, char** argv) {
   }
 
   // Node は大きい（固定容量のバッファを持つ）のでスタックに置かない
-  static node::app::Node app(config, registry, link, clock, rng, *log);
+  static node::platform::HostTimeSync time_sync(args.sntp_delay_ms);
+  static node::platform::HostNetwork network(args.net_down);
+  static node::app::Node app(config, registry, link, network, time_sync, clock, rng, *log);
   if (auto r = app.start(); !r) {
     std::fprintf(stderr, "start failed: %.*s\n", static_cast<int>(r.error().what.size()), r.error().what.data());
     return 1;
