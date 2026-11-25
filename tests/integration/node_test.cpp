@@ -11,7 +11,9 @@
 #include "infra/formats.hpp"
 #include "config/devices.hpp"
 #include "domain/pump_interlock.hpp"
+#include "drivers/sensor_io.hpp"
 #include "drivers/sim/sim_sensor.hpp"
+#include "drivers/ui_io.hpp"
 #include "support/fakes.hpp"
 
 namespace node::app {
@@ -63,14 +65,15 @@ class NodeTest : public ::testing::Test {
   std::array<domain::IInterlock*, 2> pump_interlocks{&pump_max_on, &pump_off_on_soil_fault};
   std::array<domain::ActuatorBinding, 4> actuators{
       {{&fan, fan_interlocks}, {&led, {}}, {&pump, pump_interlocks}, {&buzzer, {}}}};
+  domain::DeviceRegistry registry{sensors, actuators, config::kRules};
+  drivers::SensorIo sensor_io{registry.sensors()};
+  drivers::UiIo ui_io{registry.ui()};
   std::unique_ptr<Node> node;
 
   void SetUp() override {
     NodeConfig cfg{};
     cfg.password = "secret";
-    node = std::make_unique<Node>(cfg, domain::DeviceRegistry(sensors, actuators, config::kRules), link, network,
-                                  sync, clock, rng,
-                                  log);
+    node = std::make_unique<Node>(cfg, registry, sensor_io, ui_io, link, network, sync, clock, rng, log);
     ASSERT_TRUE(node->start());
   }
 

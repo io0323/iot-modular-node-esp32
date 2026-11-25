@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "domain/device.hpp"
+#include "domain/io.hpp"
 #include "domain/reading_store.hpp"
 #include "support/static_vector.hpp"
 
@@ -14,6 +15,7 @@ namespace node::app {
 
 /// @brief センサーの周期的な計測と故障の管理（基本設計書 FR-02、第7章「I2C センサー無応答」）。
 ///
+/// ハードに触る部分（read・init・回復の実行）は domain::ISensorIo（drivers::SensorIo）が受け持つ（P6 の決定 #110）。
 /// - 周期の計測で読めなければ、その場で続けて2回まで読み直す。3回続けて失敗したら回復（I2C はバスの回復）を1回だけ
 ///   要求し、そのセンサーのチャネルを fault にして SENSOR_FAULT をチャネルごとに1件出す（#6・#48・#55）
 /// - 故障の間は30秒ごとに init で再初期化を試み、続けて読めたら SENSOR_RECOVERED をチャネルごとに1件出す
@@ -25,7 +27,6 @@ class SensorPoller {
   static constexpr std::size_t kMaxSensors = 8;                                  ///< 扱えるセンサーの数
   static constexpr std::size_t kMaxReadings = domain::ReadingStore::kMaxChannels;  ///< 1周で読むチャネルの上限
   static constexpr std::uint64_t kReinitIntervalMs = std::uint64_t{30} * 1000U;    ///< 故障中の再初期化の間隔
-  static constexpr std::uint32_t kAttemptsBeforeRecovery = 3;                     ///< 回復を要求するまでの失敗の回数
 
   /// @brief センサーの故障・復旧（イベントの元）。
   struct SensorChange {
@@ -54,10 +55,24 @@ class SensorPoller {
   /// @return 倍率
   [[nodiscard]] std::uint32_t period_factor() const { return factor_; }
 
-  /// @brief 周期が来たセンサーを計測する。
+  /// @brief 1周分の依頼。
+  using Requests = support::StaticVector<domain::SensorRequest, kMaxSensors>;
+
+  /// @brief 周期が来たセンサーへの依頼を決める（読む・再初期化・故障中の周期）。周期と再初期化の時刻を進める。
   /// @param now_ms いまの単調時計
+  /// @param out 依頼の書き込み先（呼ぶたびに空にする）
+  void plan(std::uint64_t now_ms, Requests& out);
+  /// @brief 依頼の結果を受けて、計測値・故障・復旧を決める（時刻は依頼した時刻）。
+  /// @param report 結果
+  /// @param out 結果の書き込み先（足していく）
+  void apply(const domain::SensorReport& report, Result& out);
+
+  /// @brief 1周分：依頼を決めて io に渡し、返ってきた結果をすべて受ける（ホスト版はその場で、ターゲット版は
+  /// sense のタスクから前の周までに返ってきた結果を受ける）。
+  /// @param now_ms いまの単調時計
+  /// @param io センサーのハードに触る部分
   /// @param out 結果の書き込み先（呼ぶたびに空にする）
-  void tick(std::uint64_t now_ms, Result& out);
+  void tick(std::uint64_t now_ms, domain::ISensorIo& io, Result& out);
 
   /// @brief 計測に失敗した回数（読み直しを含む。診断用）。
   /// @return 回数
@@ -77,14 +92,15 @@ class SensorPoller {
   [[nodiscard]] std::uint64_t period_ms(const domain::ISensor& s) const;
   void register_periods();
   void advance_due(State& st, const domain::ISensor& s, std::uint64_t now_ms) const;
-  bool read_into(domain::ISensor& s, std::uint64_t now_ms, Result& out);
+  void store_readings(const domain::SensorReport& report, Result& out);
   void add_fault_readings(const domain::ISensor& s, Result& out) const;
   void mark_faulted(std::size_t i, std::uint64_t now_ms, Result& out);
-  void tick_faulted(std::size_t i, std::uint64_t now_ms, Result& out);
+  void apply_reinit(const domain::SensorReport& report, Result& out);
 
   std::span<domain::ISensor* const> sensors_;
   domain::ReadingStore& store_;
   std::array<State, kMaxSensors> states_{};
+  Requests requests_{};
   std::uint32_t factor_{1};
   std::uint32_t read_errors_{0};
   std::uint32_t recoveries_{0};

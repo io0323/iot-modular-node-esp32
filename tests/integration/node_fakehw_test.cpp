@@ -7,6 +7,8 @@
 
 #include "app/node.hpp"
 #include "config/fakehw.hpp"
+#include "drivers/sensor_io.hpp"
+#include "drivers/ui_io.hpp"
 #include "support/fakes.hpp"
 
 namespace node::app {
@@ -26,11 +28,14 @@ class NodeFakeHwTest : public ::testing::Test {
   drivers::fake::FakeTimer timer;
   drivers::fake::FakeMutex mutex;
   config::FakeHwRig rig{timer, mutex};
+  domain::DeviceRegistry registry = rig.registry();
+  drivers::SensorIo sensor_io{registry.sensors()};
+  drivers::UiIo ui_io{registry.ui()};
   std::unique_ptr<Node> node;
 
   void SetUp() override {
     NodeConfig cfg{};
-    node = std::make_unique<Node>(cfg, rig.registry(), link, network, sync, clock, rng, log);
+    node = std::make_unique<Node>(cfg, registry, sensor_io, ui_io, link, network, sync, clock, rng, log);
     ASSERT_TRUE(node->start());
     run_for(100);
   }
