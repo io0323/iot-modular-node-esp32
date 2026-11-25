@@ -1,0 +1,4 @@
+# ThreadSanitizer の抑止（TSAN_OPTIONS="suppressions=tools/tsan.supp"）。すべて docs/quality.md の抑止の表に載せる。
+# Paho v1.3.16 の中だけの race（open-questions #89）：MQTTAsync_connect がミューテックスを外した後に Clients のビットフィールドを書き、
+# 送信スレッドが MQTTAsync_checkTimeouts で同じワードの connect_state を読む。自分のコードは公開 API を呼ぶだけで避けられない
+race:MQTTAsync_checkTimeouts
