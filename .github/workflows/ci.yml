@@ -246,3 +246,44 @@ jobs:
             build/firmware/mcu_cpp_01.bin
             build/firmware/mcu_cpp_01.map
           if-no-files-found: warn
+
+  qemu:
+    name: QEMU（起動・4つのタスク・BOOT・stats、ファームウェアの契約テスト）
+    runs-on: ubuntu-24.04
+    # tools/qemu.sh は Mac と同じ espressif/idf:v5.5.6 のイメージを docker run で使う（#94・#120）
+    env:
+      IOTSPEC_MQTT_PASSWORD: ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 起動の試験（構成 qemu：起動・4つのタスク・BOOT の power_on・stats・スタックの残り 25% 以上）
+        shell: bash  # -o pipefail（tee で失敗を隠さない）
+        run: tools/qemu.sh test 2>&1 | tee qemu-test.txt
+
+      - name: Mosquitto（ACL・パスワード付き）
+        if: always()
+        run: |
+          external/iot-common-spec/deploy/mosquitto/gen_passwd.sh
+          docker compose -f external/iot-common-spec/docker-compose.yml up -d mosquitto
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/1883) 2>/dev/null; then echo "port 1883 open"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::Mosquitto のポート 1883 が開かない"; exit 1
+
+      - name: ファームウェアの契約テスト（構成 qemu-fakehw、--role mcu-cpp-01。#132）
+        if: always()
+        shell: bash  # -o pipefail（tee で失敗を隠さない）
+        run: tools/qemu.sh contract 2>&1 | tee qemu-contract.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qemu
+          path: |
+            qemu-test.txt
+            qemu-contract.txt
+            build/qemu/
+          if-no-files-found: warn

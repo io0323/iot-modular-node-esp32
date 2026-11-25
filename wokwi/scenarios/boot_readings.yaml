@@ -1,0 +1,14 @@
+# 起動と計測値（P7）：BOOT（power_on）、センサーが読めること（diag の read_errors 0）、OLED の表示（計測値の画面）
+name: 起動と計測値
+version: 1
+author: iot-modular-node-esp32
+steps:
+  - wait-serial: '"reset_reason":"power_on","platform_reason":"ESP_RST_POWERON"'
+  - wait-serial: '"ev":"stats"'
+  # 最初の計測と表示の書き込みを待つ（diag は10秒ごと）
+  - wait-serial: '"read_errors":0,"sensor_recoveries":0,"display_errors":0'
+  - delay: 2s
+  - take-screenshot:
+      part-id: oled
+      save-to: ../../build/wokwi/oled-auto.png
+      compare-with: screenshots/oled-auto.png

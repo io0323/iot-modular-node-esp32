@@ -71,13 +71,6 @@ Result<Publisher::Sent> Publisher::defer(Kind kind, std::string_view message, st
   return enqueue_retry(kind, message, seq);
 }
 
-Result<Publisher::Sent> Publisher::republish(Kind kind, std::string_view message, std::uint32_t seq) {
-  if (!online()) {
-    return make_error(ErrorCode::NotConnected, "not connected");
-  }
-  return send_built(kind, message, seq, false);
-}
-
 Result<void> Publisher::publish_uncounted(Kind kind, std::string_view message) {
   if (!online()) {
     return make_error(ErrorCode::NotConnected, "not connected");

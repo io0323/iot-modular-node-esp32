@@ -15,10 +15,13 @@ set(NODE_JSMN_DIR "${jsmn_SOURCE_DIR}" CACHE INTERNAL "jsmn のヘッダの場�
 set(NODE_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../src" CACHE INTERNAL "作品02 の src/")
 
 # 秘密は sdkconfig.defaults.local（.gitignore。見本は sdkconfig.defaults.local.example）に書き、あれば重ねる（#102）
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.local")
-  set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.defaults.local")
-else()
-  set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
+  list(APPEND SDKCONFIG_DEFAULTS "sdkconfig.defaults.local")
+endif()
+# エミュレーターの構成（tools/qemu.sh・wokwi）：環境変数 NODE_SDKCONFIG_EXTRA に、重ねる defaults を ; で並べる（#119〜#121）
+if(DEFINED ENV{NODE_SDKCONFIG_EXTRA})
+  list(APPEND SDKCONFIG_DEFAULTS $ENV{NODE_SDKCONFIG_EXTRA})
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

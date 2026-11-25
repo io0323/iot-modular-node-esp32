@@ -1,0 +1,2 @@
+# 試験用（#131）：ui タスクが 10 秒後にタスクウォッチドッグへ知らせるのをやめる。次の BOOT が watchdog になることを Wokwi で確かめる
+CONFIG_NODE_TEST_HANG_TASK=y

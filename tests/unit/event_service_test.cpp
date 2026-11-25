@@ -190,6 +190,30 @@ TEST_F(EventServiceTest, UnackedEventsAreResentWithSameMsgIdSeqAndTs) {
   EXPECT_EQ(json_value(all[8].payload, "seq"), "6");
 }
 
+TEST_F(EventServiceTest, ResentEventIsByteIdenticalEvenAfterTimeOffsetChanges) {
+  // P7（#116）：確認待ちの電文は写しを持たず、msg_id・seq・ts と中身の値から作り直す。
+  // 送ってから送り直すまでのあいだに時刻の同期で差が変わっても、ts は送ったときの値のまま
+  connect();
+  link.auto_puback = false;
+  ASSERT_TRUE(ev.post("SENSOR_FAULT", Severity::Critical, R"({"error":"timeout","tries":3})", env.now(), "soil"));
+  clock.advance(10);
+  ASSERT_TRUE(ev.post("MODE_CHANGED", Severity::Info, R"({"from":"auto","to":"manual","cause":"button"})", env.now()));
+  ev.flush(pub);
+  const auto first = link.on("event");
+  ASSERT_EQ(first.size(), 2U);
+  disconnect();
+  sync.set_offset(test::FakeTimeSync::kSampleTs + 3'600'000);  // 1時間ずれを直した
+  clock.advance(5000);
+  link.auto_puback = true;
+  connect();
+  ev.flush(pub);
+  const auto all = link.on("event");
+  ASSERT_EQ(codes(), (std::vector<std::string>{"SENSOR_FAULT", "MODE_CHANGED", "UPSTREAM_LOST", "SENSOR_FAULT",
+                                                "MODE_CHANGED", "UPSTREAM_RESTORED"}));
+  EXPECT_EQ(all[3].payload, first[0].payload);  // バイト単位で同じ
+  EXPECT_EQ(all[4].payload, first[1].payload);
+}
+
 TEST_F(EventServiceTest, LostIsAheadOfResentEvents) {
   // 送り直しの電文は LOST より前に起きているが、LOST を先頭に置く（受け手が切れ目を先に知る、#70）
   connect();

@@ -1,0 +1,25 @@
+# ボタンとモード（P7）：MODE の短押しで AUTO → MANUAL → SAVE（表示を消す）→ AUTO と変わる（FR-08）。MANUAL の画面を比べる
+name: ボタンとモード
+version: 1
+author: iot-modular-node-esp32
+steps:
+  - wait-serial: '"reset_reason":"power_on"'
+  - wait-serial: '"ev":"diag","mode":"auto"'
+  - set-control: { part-id: btn_mode, name: pressed, value: 1 }
+  - delay: 200ms
+  - set-control: { part-id: btn_mode, name: pressed, value: 0 }
+  - wait-serial: '"ev":"diag","mode":"manual"'
+  - take-screenshot:
+      part-id: oled
+      save-to: ../../build/wokwi/oled-manual.png
+      compare-with: screenshots/oled-manual.png
+  - set-control: { part-id: btn_mode, name: pressed, value: 1 }
+  - delay: 200ms
+  - set-control: { part-id: btn_mode, name: pressed, value: 0 }
+  # SAVE では表示を消す（Display OFF）。Wokwi の画面の取り込みは表示のメモリの内容で、消灯を写さない（P7 で確かめた）ので、
+  # ここは画面を比べない（消灯の命令はホスト版のテストで確かめる）
+  - wait-serial: '"ev":"diag","mode":"power_save"'
+  - set-control: { part-id: btn_mode, name: pressed, value: 1 }
+  - delay: 200ms
+  - set-control: { part-id: btn_mode, name: pressed, value: 0 }
+  - wait-serial: '"ev":"diag","mode":"auto"'

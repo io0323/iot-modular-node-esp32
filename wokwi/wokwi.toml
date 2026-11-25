@@ -1,0 +1,14 @@
+# Wokwi の構成（P7。docs/quality.md「エミュレーター」）。ファームウェアは tools/wokwi.sh がビルドする（構成 wokwi）。
+# チップは tools/wokwi.sh が wokwi-cli chip compile で WASM にする（*.chip.wasm はコミットしない）。
+[wokwi]
+version = 1
+firmware = '../build/firmware-wokwi/flash.bin'
+elf = '../build/firmware-wokwi/mcu_cpp_01.elf'
+
+[[chip]]
+name = 'bme280'
+binary = 'chips/bme280.chip.wasm'
+
+[[chip]]
+name = 'bh1750'
+binary = 'chips/bh1750.chip.wasm'

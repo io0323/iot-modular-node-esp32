@@ -13,3 +13,7 @@ contract*.xml
 /firmware/sdkconfig.defaults.local
 /firmware/managed_components/
 /firmware/dependencies.lock
+
+# Wokwi：チップの WASM と、wokwi-cli が取ってくるヘッダはコミットしない（tools/wokwi.sh が作る）
+/wokwi/chips/*.chip.wasm
+/wokwi/chips/wokwi-api.h

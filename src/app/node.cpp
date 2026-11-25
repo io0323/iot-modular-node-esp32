@@ -33,18 +33,21 @@ support::Result<void> Node::start() {
   if (!topics_.ok()) {
     return support::make_error(support::ErrorCode::InvalidArgument, "topic too long");
   }
+  // センサーと UI の機器の初期化に失敗しても起動を止めない（#130）。センサーは最初の計測で fault になり、
+  // SENSOR_FAULT と30秒ごとの再初期化に任せる（基本設計書 第7章）。UI は表示とボタンが使えないだけ
   for (domain::ISensor* s : registry_.sensors()) {
-    if (auto r = s->init(); !r) {
-      return r;
+    if (!s->init()) {
+      log_fields("init_failed", "sensor", s->id());
     }
   }
+  // アクチュエーターは出力を 0 にできないと安全でないので、今のまま起動を止める
   for (const domain::ActuatorBinding& b : registry_.actuators()) {
     if (auto r = b.actuator->init(); !r) {
       return r;
     }
   }
-  if (auto r = ui_io_.init(); !r) {
-    return r;
+  if (!ui_io_.init()) {
+    log_fields("init_failed", "device", "ui");
   }
   const std::uint64_t now = clock_.monotonic_ms();
   poller_.start(now);
@@ -64,6 +67,7 @@ support::Result<void> Node::start() {
   f.begin_object();
   f.key("boot_id").string(envelope_.boot_id());
   f.key("reset_reason").string(config_.reset_reason);
+  f.key("platform_reason").string(config_.platform_reason);
   f.end_object();
   if (f.ok()) {
     log_.write("boot", f.view());

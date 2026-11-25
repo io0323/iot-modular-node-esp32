@@ -1,0 +1,6 @@
+{
+  "name": "BME280 (registers only)",
+  "author": "iot-modular-node-esp32",
+  "pins": ["VCC", "GND", "SCL", "SDA"],
+  "controls": []
+}

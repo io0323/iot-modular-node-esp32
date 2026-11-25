@@ -6,6 +6,7 @@
 #include "driver/ledc.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 namespace node::platform::esp32 {
 
@@ -121,6 +122,10 @@ Result<void> EspI2cBus::recover() {
 // ---------------- ADC
 
 Result<void> EspAdc::init() {
+#if CONFIG_NODE_TEST_NO_ADC
+  // 試験用（QEMU）：ADC のドライバを呼ばない。esp_adc の起動時の自己校正が QEMU で止まるため（#129）
+  return make_error(ErrorCode::IoError, "adc disabled (NODE_TEST_NO_ADC)");
+#else
   adc_oneshot_unit_init_cfg_t uc{};
   uc.unit_id = ADC_UNIT_1;
   if (auto r = check(adc_oneshot_new_unit(&uc, &unit_), "adc_oneshot_new_unit"); !r) {
@@ -140,9 +145,14 @@ Result<void> EspAdc::init() {
     }
   }
   return support::ok();
+#endif
 }
 
 Result<std::uint16_t> EspAdc::read_raw(hal::Pin channel) {
+#if CONFIG_NODE_TEST_NO_ADC
+  (void)channel;
+  return make_error(ErrorCode::IoError, "adc disabled (NODE_TEST_NO_ADC)");
+#else
   const config::esp32::PinMap* p = find_pin(pins_, channel);
   if (p == nullptr || unit_ == nullptr) {
     return make_error(ErrorCode::InvalidArgument, "adc channel");
@@ -157,6 +167,7 @@ Result<std::uint16_t> EspAdc::read_raw(hal::Pin channel) {
     return make_error(ErrorCode::IoError, "adc_oneshot_read");
   }
   return static_cast<std::uint16_t>(raw);
+#endif
 }
 
 // ---------------- PWM（LEDC）

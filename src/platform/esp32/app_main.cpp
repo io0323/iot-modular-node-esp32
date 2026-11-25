@@ -11,12 +11,17 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
+#include "platform/esp32/esp32_eth.hpp"
 #include "platform/esp32/esp32_hal.hpp"
 #include "platform/esp32/esp32_infra.hpp"
 #include "platform/esp32/esp32_mqtt.hpp"
 #include "platform/esp32/esp32_tasks.hpp"
 #include "sdkconfig.h"
 #include "support/fixed_string.hpp"
+
+#if CONFIG_NODE_TEST_FAKE_HW
+#include "config/fakehw.hpp"
+#endif
 
 namespace node::platform::esp32 {
 
@@ -61,7 +66,12 @@ domain::DeviceRegistry init_devices() {
   if (!adc.init()) {
     ESP_LOGE(kTag, "adc init failed");
   }
+#if CONFIG_NODE_TEST_FAKE_HW
+  // 試験用（#132）：ドライバはそのままで、hal と機器をフェイクに替える（QEMU は I2C・ADC を再現しない）
+  static config::FakeHwRig rig(timer, i2c_mutex);
+#else
   static config::HwRig rig(config::HwInterfaces{i2c, i2c_mutex, adc, pwm, gpio, timer});
+#endif
   const domain::DeviceRegistry registry = rig.registry();
   for (const domain::ActuatorBinding& b : registry.actuators()) {
     if (!b.actuator->init()) {
@@ -71,14 +81,22 @@ domain::DeviceRegistry init_devices() {
   return registry;
 }
 
-/// 2. Wi-Fi を起動する（RF が動き、esp_random が真の乱数になる。#101）と SNTP（#103）
-EspNetwork& start_network() {
+/// 2. Wi-Fi を起動する（RF が動き、esp_random が真の乱数になる。#101）と SNTP（#103）。
+/// 試験用の NODE_NET_QEMU_ETH では、Wi-Fi の代わりに QEMU の OpenCores Ethernet を使う（#120）
+infra::INetwork& start_network() {
   (void)esp_netif_init();
   (void)esp_event_loop_create_default();
+#if CONFIG_NODE_NET_QEMU_ETH
+  static EspEthNetwork network;
+  if (!network.start()) {
+    ESP_LOGE(kTag, "ethernet start failed");
+  }
+#else
   static EspNetwork network;
   if (!network.start(CONFIG_NODE_WIFI_SSID, CONFIG_NODE_WIFI_PASSWORD)) {
     ESP_LOGE(kTag, "wifi start failed");
   }
+#endif
   static const support::FixedString<128> broker_host = host_of(CONFIG_NODE_MQTT_URL);
   const char* const sntp1 =
       std::string_view(CONFIG_NODE_SNTP_SERVER1).empty() ? broker_host.c_str() : CONFIG_NODE_SNTP_SERVER1;
@@ -103,7 +121,7 @@ app::NodeConfig node_config() {
 void run() {
   init_nvs();
   const domain::DeviceRegistry registry = init_devices();
-  EspNetwork& network = start_network();
+  infra::INetwork& network = start_network();
 
   // ---- 3. Node を作る（boot_id はここで esp_random から決まる。#101）
   static EspClock clock;

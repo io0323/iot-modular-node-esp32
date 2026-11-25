@@ -14,6 +14,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "sdkconfig.h"
 #include "infra/formats.hpp"
 #include "infra/json_writer.hpp"
 #include "platform/esp32/rtos.hpp"
@@ -63,7 +64,11 @@ Result<void> EspNetwork::start(std::string_view ssid, std::string_view password)
   wifi_config_t cfg{};
   std::memcpy(cfg.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(cfg.sta.ssid) - 1));
   std::memcpy(cfg.sta.password, password.data(), std::min(password.size(), sizeof(cfg.sta.password) - 1));
+#if CONFIG_NODE_WIFI_ALLOW_OPEN
+  cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;  // 試験用：Wokwi の Wokwi-GUEST（開いた AP。#128）
+#else
   cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;  // WPA2-PSK 以上（#113）
+#endif
   if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK || esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) {
     return make_error(ErrorCode::Internal, "esp_wifi_set_config");
   }

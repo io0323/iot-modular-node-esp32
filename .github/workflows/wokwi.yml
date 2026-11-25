@@ -1,0 +1,54 @@
+name: wokwi
+
+# Wokwi の無料枠は CI の実行が 30 日で 50 分まで（docs/quality.md「エミュレーター」）なので、push のたびには流さない。
+# 動くのは次のときだけ（#133・#138）。1回の実行で使ったシミュレーションの時間はジョブのログに出る
+# - main への push（firmware/・src/・wokwi/ が変わったときだけ）
+# - PR にラベル wokwi を付けたとき（付けるたびに1回。マージの前に流す。手動の実行は wokwi.yml が main にないと使えないため）
+# - 手動の実行（gh workflow run wokwi.yml --ref <ブランチ>。wokwi.yml が main に入った後）
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "src/**"
+      - "wokwi/**"
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+jobs:
+  wokwi:
+    name: Wokwi（起動と計測値・ボタンとモード・Wi-Fi とヒープ・タスクウォッチドッグ）
+    # PR のラベルは wokwi のときだけ（ほかのラベルでは動かさない）
+    if: github.event_name != 'pull_request' || github.event.label.name == 'wokwi'
+    runs-on: ubuntu-24.04
+    env:
+      WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: シークレットがなければ省略
+        if: env.WOKWI_CLI_TOKEN == ''
+        run: echo "::notice::WOKWI_CLI_TOKEN のシークレットがないので Wokwi の試験を省略する"
+
+      - name: wokwi-cli（v0.29.1）
+        if: env.WOKWI_CLI_TOKEN != ''
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/wokwi-cli" https://github.com/wokwi/wokwi-cli/releases/download/v0.29.1/wokwi-cli-linuxstatic-x64
+          chmod +x "$HOME/.local/bin/wokwi-cli"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: シナリオ（tools/wokwi.sh）
+        if: env.WOKWI_CLI_TOKEN != ''
+        shell: bash  # -o pipefail（tee で失敗を隠さない）
+        run: tools/wokwi.sh 2>&1 | tee wokwi.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wokwi
+          path: |
+            wokwi.txt
+            build/wokwi/
+          if-no-files-found: ignore

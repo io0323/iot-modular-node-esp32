@@ -33,36 +33,41 @@ TEST(Lease, ExpiresExactlyAtStartPlusLease) {
 
 // ---- CmdDedupCache
 
-TEST(CmdDedupCache, RemembersPayloadIncludingRejected) {
+TEST(CmdDedupCache, RemembersAckIncludingRejected) {
   CmdDedupCache c;
-  ASSERT_TRUE(c.insert(test::ulid(1), R"({"status":"rejected","reason":"unknown_op"})", 0));
+  AckRecord rej{};
+  rej.rejected = true;
+  rej.reason = 2;
+  ASSERT_TRUE(c.insert(test::ulid(1), rej, 0));
   const auto hit = c.find(test::ulid(1), 1000);
   ASSERT_TRUE(hit.has_value());
-  EXPECT_EQ(hit->view(), R"({"status":"rejected","reason":"unknown_op"})");
+  EXPECT_TRUE(hit->rejected);
+  EXPECT_EQ(hit->reason, 2U);
   EXPECT_FALSE(c.find(test::ulid(2), 1000).has_value());
 }
 
 TEST(CmdDedupCache, ForgetsAfterTenMinutes) {
   CmdDedupCache c;
-  ASSERT_TRUE(c.insert(test::ulid(1), "{}", 5'000));
+  ASSERT_TRUE(c.insert(test::ulid(1), AckRecord{}, 5'000));
   EXPECT_TRUE(c.find(test::ulid(1), 5'000 + CmdDedupCache::kRetentionMs - 1).has_value());
   EXPECT_FALSE(c.find(test::ulid(1), 5'000 + CmdDedupCache::kRetentionMs).has_value());
 }
 
 TEST(CmdDedupCache, PushesOutOldestBeyond64) {
   CmdDedupCache c;
-  for (int i = 0; i < 65; ++i) ASSERT_TRUE(c.insert(test::ulid(i), std::to_string(i), 0));
+  for (int i = 0; i < 65; ++i) {
+    AckRecord a{};
+    a.output = true;
+    a.applied = static_cast<Level>(i);
+    ASSERT_TRUE(c.insert(test::ulid(i), a, 0));
+  }
   EXPECT_EQ(c.size(), 64U);
   EXPECT_FALSE(c.find(test::ulid(0), 0).has_value());  // 最初の1件が押し出される
   EXPECT_TRUE(c.find(test::ulid(1), 0).has_value());
-  EXPECT_EQ(c.find(test::ulid(64), 0)->view(), "64");
+  EXPECT_EQ(c.find(test::ulid(64), 0)->applied, 64);
 }
 
-TEST(CmdDedupCache, RefusesTooLongInput) {
-  CmdDedupCache c;
-  EXPECT_FALSE(c.insert(std::string(27, 'A'), "{}", 0));
-  EXPECT_FALSE(c.insert(test::ulid(1), std::string(CmdDedupCache::kPayloadMax + 1, 'x'), 0));
-}
+TEST(CmdDedupCache, RefusesTooLongCmdId) { EXPECT_FALSE(CmdDedupCache{}.insert(std::string(27, 'A'), AckRecord{}, 0)); }
 
 // ---- PumpInterlock
 

@@ -35,7 +35,6 @@ class EventService {
  public:
   static constexpr std::size_t kCapacity = 32;     ///< 保持する件数（#8）
   static constexpr std::size_t kDetailMax = 192;   ///< detail の最大長
-  static constexpr std::size_t kMessageMax = 768;  ///< 送り直しに写す電文の最大長
 
   /// @brief イベントをためる。あふれたら BOOT を除く中で最も古いものを捨てる。
   /// @param code コード（例："BOOT"）
@@ -85,9 +84,8 @@ class EventService {
     support::FixedString<32> channel;
     infra::Stamp stamp{};
     Role role{Role::Normal};
-    bool built{false};  ///< 組み立て済み（送り直し。message と seq を変えない）
-    support::FixedString<kMessageMax> message;
-    std::uint32_t seq{0};
+    bool sent{false};                ///< 一度送った（送り直しは fields のまま作り直す。#71・#116）
+    infra::EnvelopeFields fields{};  ///< 送った電文の msg_id・seq・ts
   };
   struct Inflight {
     std::uint32_t token{0};
@@ -97,6 +95,7 @@ class EventService {
   [[nodiscard]] std::size_t normal_count() const;
   void drop_oldest();
   bool insert_front(const Pending& p);
+  static void write_payload(const Pending& p, infra::JsonWriter& w);
   static support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
 
   support::StaticVector<Pending, kCapacity + 2> queue_{};
