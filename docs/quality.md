@@ -170,7 +170,7 @@ Wi-Fi と MQTT の接続を同時に測れる環境はありません。QEMU で
 - 無料の利用者の CI は、シミュレーションの時間で30日あたり50分まで、1回の実行は実際の経過時間で5分まで（docs.wokwi.com/wokwi-ci/getting-started「Free users: 50 minutes」「The simulation time is calculated as the sum of the simulation time of all the tests」）
 - `tools/wokwi.sh` は、シナリオごとのシミュレーションの時間と合計をログに出す。P7 の目安：boot_readings 13秒・buttons_mode 41秒・wifi_heap 62秒・watchdog 17秒、合計で約133秒。無料枠では30日におよそ22回流せる
 - タイムアウト（シミュレーションの時間）は、目安の約2倍に設定している。boot_readings 40秒・buttons_mode 60秒・wifi_heap 90秒・watchdog 40秒
-- CI の Wokwi は別のワークフロー（`.github/workflows/wokwi.yml`）。動くのは、main への push で `firmware/`・`src/`・`wokwi/` が変わったときと、手動の実行のときだけ（#133）
+- CI の Wokwi は別のワークフロー（`.github/workflows/wokwi.yml`）。動くのは次のときだけ：main への push で `firmware/`・`src/`・`wokwi/` が変わったとき、PR にラベル `wokwi` を付けたとき、手動の実行のとき（#133・#138。手動の実行は、ワークフローのファイルが main にあるときだけ使える）
 - Wokwi のサーバーとの接続が、シミュレーションが始まる前に切れることがある（API Error、code 1006。P7 で2回あった）。時間を使わずに失敗したときだけ、15秒待って2回まで流し直す
 
 ## RAM の見直し（P7）

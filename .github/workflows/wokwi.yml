@@ -1,8 +1,10 @@
 name: wokwi
 
 # Wokwi の無料枠は CI の実行が 30 日で 50 分まで（docs/quality.md「エミュレーター」）なので、push のたびには流さない。
-# main への push（firmware/・src/・wokwi/ が変わったときだけ）と、手動の実行（gh workflow run wokwi.yml --ref <ブランチ>）
-# だけで動かす（#133）。1回の実行で使ったシミュレーションの時間はジョブのログに出る
+# 動くのは次のときだけ（#133・#138）。1回の実行で使ったシミュレーションの時間はジョブのログに出る
+# - main への push（firmware/・src/・wokwi/ が変わったときだけ）
+# - PR にラベル wokwi を付けたとき（付けるたびに1回。マージの前に流す。手動の実行は wokwi.yml が main にないと使えないため）
+# - 手動の実行（gh workflow run wokwi.yml --ref <ブランチ>。wokwi.yml が main に入った後）
 on:
   push:
     branches: [main]
@@ -10,11 +12,15 @@ on:
       - "firmware/**"
       - "src/**"
       - "wokwi/**"
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
 
 jobs:
   wokwi:
     name: Wokwi（起動と計測値・ボタンとモード・Wi-Fi とヒープ・タスクウォッチドッグ）
+    # PR のラベルは wokwi のときだけ（ほかのラベルでは動かさない）
+    if: github.event_name != 'pull_request' || github.event.label.name == 'wokwi'
     runs-on: ubuntu-24.04
     env:
       WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}

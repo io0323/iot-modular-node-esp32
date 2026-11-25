@@ -115,7 +115,7 @@ tools/wokwi.sh            # Wokwi：起動と計測値・ボタンとモード�
 - **QEMU**（ESP-IDF v5.5.6 同梱の qemu-xtensa）：Wi-Fi・I2C・ADC・LEDC は再現されない。ネットワークは仮想の Ethernet（OpenCores Ethernet）で、ホストの Mosquitto につないで契約テストを流す。I2C と ADC の機器は、試験用の構成でフェイクに替える。タスクウォッチドッグは働かないので、Wokwi で確かめる
 - **Wokwi**（wokwi-cli v0.29.1）：図は `wokwi/diagram.json`。BME280 と BH1750 は、データシートのレジスタだけを再現したカスタムチップ（`wokwi/chips/`）。Wi-Fi は Wokwi-GUEST。MQTT はつなげない（ローカルのブローカーにつなぐ Private Gateway は有料の機能。公開のブローカーは使わない）
 - Wokwi のトークンは、環境変数 `WOKWI_CLI_TOKEN` か `~/.config/wokwi/token`（1行、`chmod 600`）。CI ではシークレット `WOKWI_CLI_TOKEN` を使い、なければジョブを「省略」として通す
-- **Wokwi の無料枠**：CI はシミュレーションの時間で30日あたり50分、1回の実行は実際の経過時間で5分まで（docs.wokwi.com/wokwi-ci/getting-started）。4本で約133秒なので、30日におよそ22回流せる。そのため CI の Wokwi は、main への push で `firmware/`・`src/`・`wokwi/` が変わったときと、手動の実行（`gh workflow run wokwi.yml --ref <ブランチ>`）のときだけ動かす
+- **Wokwi の無料枠**：CI はシミュレーションの時間で30日あたり50分、1回の実行は実際の経過時間で5分まで（docs.wokwi.com/wokwi-ci/getting-started）。4本で約133秒なので、30日におよそ22回流せる。そのため CI の Wokwi は、次のときだけ動かす：main への push で `firmware/`・`src/`・`wokwi/` が変わったとき、PR にラベル `wokwi` を付けたとき（マージの前に1回流す）、手動の実行（`gh workflow run wokwi.yml --ref <ブランチ>`）のとき
 
 ## 動かし方（ホスト版）
 
