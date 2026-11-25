@@ -1,6 +1,7 @@
 // 固定容量コンテナ。Error Framework の仮の代わりとあわせて、取り込み元が決まったら見直す（docs/open-questions.md #5）。
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
@@ -30,12 +31,12 @@ class StaticVector {
   /// @brief 指定した位置の要素を消し、後ろを詰める。
   /// @param index 位置（size() 未満）
   void erase_at(std::size_t index) {
-    if (index >= size_) {
+    // size_ は N を超えないが、GCC の -O2 が範囲外の添字を疑わないよう N とも比べる（振る舞いは同じ）
+    if (index >= size_ || index >= N) {
       return;
     }
-    for (std::size_t i = index + 1; i < size_; ++i) {
-      data_[i - 1] = data_[i];
-    }
+    // 後ろを1つ前に詰める（重なる範囲を前へ写すので std::copy でよい）
+    std::copy(data_.data() + index + 1, data_.data() + size_, data_.data() + index);
     --size_;
   }
 

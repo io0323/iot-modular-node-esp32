@@ -2,3 +2,6 @@
 # Paho v1.3.16 の中だけの race（open-questions #89）：MQTTAsync_connect がミューテックスを外した後に Clients のビットフィールドを書き、
 # 送信スレッドが MQTTAsync_checkTimeouts で同じワードの connect_state を読む。自分のコードは公開 API を呼ぶだけで避けられない
 race:MQTTAsync_checkTimeouts
+# Paho v1.3.16 の中だけの race（open-questions #93。CI の GCC の TSan で出る）：再接続のとき MQTTAsync_connect がミューテックスの中で
+# グローバル変数 MQTTAsync_tostop を書き、送信・受信スレッドがミューテックスなしで読む。変数名で絞り、この変数の race だけを外す
+race:MQTTAsync_tostop
