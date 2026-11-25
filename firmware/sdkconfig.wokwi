@@ -1,0 +1,9 @@
+# Wokwi の構成（P7。tools/wokwi.sh）。Wokwi の Wi-Fi はパスワードのない Wokwi-GUEST（チャネル 6）だけなので、試験用の項目で許す（#128）。
+# Wokwi からローカルの Mosquitto にはつなげない（Private Gateway は有料の機能。#122）。MQTT の宛先はつながらない名前のままにし、
+# 公開のブローカーは使わない。MQTT はホスト版と QEMU で確かめる。
+CONFIG_NODE_WIFI_SSID="Wokwi-GUEST"
+CONFIG_NODE_WIFI_PASSWORD=""
+CONFIG_NODE_WIFI_ALLOW_OPEN=y
+CONFIG_NODE_MQTT_URL="mqtt://host.wokwi.internal:1883"
+CONFIG_NODE_SNTP_SERVER1="pool.ntp.org"
+CONFIG_NODE_SNTP_SERVER2="time.google.com"

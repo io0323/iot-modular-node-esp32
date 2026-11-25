@@ -1,0 +1,9 @@
+# タスクウォッチドッグ（P7・#131。構成 wokwi-hang）：ui が 10 秒で止まり、5 秒後にタスクウォッチドッグが切れてパニックで再起動し、
+# 次の BOOT の reset_reason が watchdog（platform_reason ESP_RST_TASK_WDT）になる（FR-10）
+name: タスクウォッチドッグ
+version: 1
+author: iot-modular-node-esp32
+steps:
+  - wait-serial: '"reset_reason":"power_on","platform_reason":"ESP_RST_POWERON"'
+  - wait-serial: 'Task watchdog got triggered'
+  - wait-serial: '"reset_reason":"watchdog","platform_reason":"ESP_RST_TASK_WDT"'

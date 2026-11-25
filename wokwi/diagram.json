@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "author": "iot-modular-node-esp32",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "chip-bme280", "id": "bme280", "top": -120, "left": 220, "attrs": {} },
+    { "type": "chip-bh1750", "id": "bh1750", "top": -40, "left": 220, "attrs": { "lux": "300" } },
+    { "type": "board-ssd1306", "id": "oled", "top": 60, "left": 220, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-potentiometer", "id": "soil", "top": 220, "left": 220, "attrs": { "value": "512" } },
+    { "type": "wokwi-led", "id": "fan_main", "top": -100, "left": -160, "attrs": { "color": "blue", "label": "fan_main" } },
+    { "type": "wokwi-led", "id": "led_grow", "top": -100, "left": -110, "attrs": { "color": "white", "label": "led_grow" } },
+    { "type": "wokwi-led", "id": "buzzer", "top": -100, "left": -60, "attrs": { "color": "yellow", "label": "buzzer" } },
+    { "type": "wokwi-relay-module", "id": "pump", "top": 200, "left": -250, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "btn_mode", "top": 300, "left": -160, "attrs": { "color": "green", "label": "MODE", "bounce": "0" } },
+    { "type": "wokwi-pushbutton", "id": "btn_action", "top": 360, "left": -160, "attrs": { "color": "red", "label": "ACTION", "bounce": "0" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "bme280:VCC", "esp:3V3.1", "red", [] ],
+    [ "bme280:GND", "esp:GND.1", "black", [] ],
+    [ "bme280:SDA", "esp:8", "green", [] ],
+    [ "bme280:SCL", "esp:9", "blue", [] ],
+    [ "bh1750:VCC", "esp:3V3.1", "red", [] ],
+    [ "bh1750:GND", "esp:GND.1", "black", [] ],
+    [ "bh1750:SDA", "esp:8", "green", [] ],
+    [ "bh1750:SCL", "esp:9", "blue", [] ],
+    [ "oled:VCC", "esp:3V3.1", "red", [] ],
+    [ "oled:GND", "esp:GND.1", "black", [] ],
+    [ "oled:SDA", "esp:8", "green", [] ],
+    [ "oled:SCL", "esp:9", "blue", [] ],
+
+    [ "soil:VCC", "esp:3V3.1", "red", [] ],
+    [ "soil:GND", "esp:GND.1", "black", [] ],
+    [ "soil:SIG", "esp:1", "orange", [] ],
+
+    [ "fan_main:A", "esp:4", "blue", [] ],
+    [ "fan_main:C", "esp:GND.1", "black", [] ],
+    [ "led_grow:A", "esp:5", "white", [] ],
+    [ "led_grow:C", "esp:GND.1", "black", [] ],
+    [ "buzzer:A", "esp:6", "yellow", [] ],
+    [ "buzzer:C", "esp:GND.1", "black", [] ],
+
+    [ "pump:VCC", "esp:5V", "red", [] ],
+    [ "pump:GND", "esp:GND.1", "black", [] ],
+    [ "pump:IN", "esp:7", "purple", [] ],
+
+    [ "btn_mode:1.l", "esp:10", "green", [] ],
+    [ "btn_mode:2.l", "esp:GND.1", "black", [] ],
+    [ "btn_action:1.l", "esp:11", "red", [] ],
+    [ "btn_action:2.l", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

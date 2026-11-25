@@ -1,0 +1,11 @@
+# Wi-Fi とヒープ（P7）：Wokwi-GUEST につながり、その後の1分ごとの stats を出す。
+# ヒープの最低残量 30KB 以上は、tools/wokwi.sh が wokwi-cli の --heap-min-free と stats の heap_min で確かめる
+name: Wi-Fi とヒープ
+version: 1
+author: iot-modular-node-esp32
+steps:
+  - wait-serial: '"reset_reason":"power_on"'
+  - wait-serial: 'sta ip:'
+  - wait-serial: '"ev":"stats"'
+  # 行の最後（heap_min）まで書かれるのを待つ（シナリオが終わるとシリアルのログもそこで切れる）
+  - delay: 1s
