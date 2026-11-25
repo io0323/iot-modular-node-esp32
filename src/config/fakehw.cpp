@@ -3,10 +3,18 @@
 namespace node::config {
 
 FakeHwRig::FakeHwRig(hal::ITimer& timer, hal::IMutex& i2c_mutex)
-    : bh1750_device_(timer), hw_(HwInterfaces{bus_, i2c_mutex, adc_, pwm_, gpio_, timer}) {
-  (void)bus_.attach(kAddrBme280, bme280_device_);
-  (void)bus_.attach(kAddrBh1750, bh1750_device_);
-  (void)bus_.attach(kAddrSsd1306, ssd1306_device_);
+    :  // 構成表（config/fakehw_table.hpp）の行の順に作る
+#define NODE_FAKE_I2C(type, name, address)
+#define NODE_FAKE_I2C_ARGS(type, name, args, address) name##_ args,
+#include "config/fakehw_table.hpp"
+#undef NODE_FAKE_I2C
+#undef NODE_FAKE_I2C_ARGS
+      hw_(HwInterfaces{bus_, i2c_mutex, adc_, pwm_, gpio_, timer}) {
+#define NODE_FAKE_I2C(type, name, address) (void)bus_.attach(address, name##_);
+#define NODE_FAKE_I2C_ARGS(type, name, args, address) NODE_FAKE_I2C(type, name, address)
+#include "config/fakehw_table.hpp"
+#undef NODE_FAKE_I2C
+#undef NODE_FAKE_I2C_ARGS
   // 模擬機器（P2）と同じ既定の環境：25℃前後、300 lx、土壌水分 40%
   bme280_device_.set_temperature_c(25.0);
   bh1750_device_.set_lux(300.0);

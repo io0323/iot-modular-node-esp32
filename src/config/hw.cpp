@@ -2,20 +2,31 @@
 
 namespace node::config {
 
-using namespace std::chrono_literals;
-
 HwRig::HwRig(const HwInterfaces& hw)
-    : bme280_(hal::I2cDevice{&hw.i2c, &hw.i2c_mutex, kAddrBme280}, hw.timer, kBmeChannels, 2000ms),
-      bh1750_(hal::I2cDevice{&hw.i2c, &hw.i2c_mutex, kAddrBh1750}, hw.timer, kLuxChannel, 1000ms),
-      soil_(hw.adc, kAdcSoil, kSoilCalibration, kSoilChannel, 10000ms),
-      fan_main_(hw.pwm, kPwmFanConfig, kFanMain),
-      led_grow_(hw.pwm, kPwmLedConfig, kLedGrow),
-      pump_(hw.gpio, kGpioPumpRelay, kPumpRelayActiveHigh, kPump),
-      buzzer_(hw.pwm, kPwmBuzzerConfig, kBuzzer),
-      display_(hal::I2cDevice{&hw.i2c, &hw.i2c_mutex, kAddrSsd1306}),
+    :  // 構成表（config/hw_table.hpp）の行の順に作る
+#define NODE_SENSOR(type, name, args, period_ms, channels) \
+  name##_(NODE_CONFIG_UNPAREN args, name##_channels_, std::chrono::milliseconds{period_ms}),
+#define NODE_ACTUATOR(type, name, args, spec, interlocks) name##_(NODE_CONFIG_UNPAREN args, name##_spec_),
+#include "config/hw_table.hpp"
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
+      display_(i2c(hw, kAddrSsd1306)),
       mode_button_(hw.gpio, kGpioButtonMode),
       action_button_(hw.gpio, kGpioButtonAction),
-      sensors_{&bme280_, &bh1750_, &soil_},
-      actuators_{{{&fan_main_, fan_interlocks_}, {&led_grow_, {}}, {&pump_, pump_interlocks_}, {&buzzer_, {}}}} {}
+#define NODE_SENSOR(type, name, args, period_ms, channels) &name##_,
+#define NODE_ACTUATOR(type, name, args, spec, interlocks)
+      sensors_{
+#include "config/hw_table.hpp"
+      },
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
+#define NODE_SENSOR(type, name, args, period_ms, channels)
+#define NODE_ACTUATOR(type, name, args, spec, interlocks) domain::ActuatorBinding{&name##_, interlocks},
+      actuators_{{
+#include "config/hw_table.hpp"
+      }} {
+}
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
 
 }  // namespace node::config
