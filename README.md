@@ -178,10 +178,56 @@ SIGTERM・SIGINT では offline の state を送ってから切断します。�
 | `Bme280` | Bosch BME280（温度・湿度・気圧、I2C） | BME280 Data sheet BST-BME280-DS001-24 rev 1.24（Feb 2024）。補正式の照合は BMP280 Data sheet BST-BMP280-DS001-26 rev 1.26（Oct 2021）3.12 節 |
 | `Bh1750` | ROHM BH1750FVI（照度、I2C） | BH1750FVI Technical Note 2011.11 Rev.D |
 | `Ssd1306` | Solomon Systech SSD1306（128×64 OLED、I2C） | SSD1306 Rev 1.1（Apr 2008）、SSD1306 Application Note Rev 0.4（Jan 2009） |
+| `Sht31` | Sensirion SHT31（SHT3x-DIS。温度・相対湿度、I2C。P8a で追加） | Datasheet SHT3x-DIS December 2022 - Version 7 |
 | `SoilMoisture` | 静電容量式の土壌水分センサー（ADC） | データシートなし。乾 3000＝0%・湿 1300＝100% の直線（**仮の校正値**。実機フェーズで校正） |
 | `PwmActuator`・`RelayActuator`・`Button` | ファン・LED・ブザー（PWM）、ポンプ（リレー）、タクトスイッチ×2 | データシートなし。値の決まりは open-questions #41〜#47・#58 |
 
 ボタンは2つです。MODE の短押しでモードを切り替えます（自動 → 手動 → 省電力 → 自動）。ACTION は手動モードでだけ働き、短押しで操作する機器を選び（fan_main → led_grow → pump → buzzer）、長押しでその機器を 0 と 1000 で切り替えます。
+
+## 拡張性の実証（P8a：SHT31 の追加）
+
+NFR-01「新しい機器の追加で変更するのは、新しいクラスのファイルと構成テーブル1行だけ。既存クラスは変更しない」を、温湿度センサー SHT31 を実際に足して確かめました（open-questions #139〜#143）。
+
+- **チャネル**：`temp_aux`（degC）と `humidity_aux`（pct_rh）。周期は 2000ms
+- **接続**：I2C0 のアドレス 0x44
+- **読み方**：単発計測・高い再現性・クロックストレッチなし。CRC-8 が合わなければ、その計測を失敗にする
+- **ルール・インターロック**：使わない（計測と送信だけ）
+- **入れた構成**：実機用の構成表と `--devices fakehw`。ホスト版の既定（模擬機器）には入れていない
+- **共通仕様のプロファイル**：`profiles/mcu-cpp-01.yaml` には2チャネルがない。共通仕様の変更案として申し送りにした（#142）
+
+### 差分（`git diff --numstat main...feature/add-sht31 -- src firmware tests`）
+
+| 区分 | ファイル | 追加 | 削除 |
+|---|---|---|---|
+| 新しいファイル | `src/drivers/sht31.hpp`・`sht31.cpp`（ドライバ） | 92・63 | 0 |
+| 新しいファイル | `src/drivers/fake/fake_sht31.hpp`（データシートの命令・応答・CRC を再現するフェイク） | 114 | 0 |
+| 新しいファイル | `tests/unit/sht31_test.cpp`・`tests/integration/node_sht31_test.cpp` | 129・136 | 0 |
+| 構成表 | `src/config/hw_table.hpp`（実機用の表の行） | 1 | 0 |
+| 構成表 | `src/config/hw.hpp`（ドライバのヘッダの include） | 1 | 0 |
+| 構成表 | `src/config/fakehw_table.hpp`（fakehw 用の表の行） | 1 | 0 |
+| 構成表 | `src/config/fakehw.hpp`（フェイクのヘッダの include） | 1 | 0 |
+| ビルド定義 | `src/CMakeLists.txt`（ホスト版のソースの一覧） | 1 | 0 |
+| ビルド定義 | `firmware/components/node_core/CMakeLists.txt`（ESP-IDF のコンポーネント） | 1 | 0 |
+| ビルド定義 | `tests/CMakeLists.txt`（テストの登録） | 1 | 0 |
+
+構成表に足した行は、次のとおりです。
+
+```cpp
+// src/config/hw_table.hpp
+NODE_SENSOR(drivers::Sht31, sht31, (i2c(hw, drivers::Sht31::kAddrA), hw.timer), 2000, ({"temp_aux", domain::Unit::DegC, 2000}, {"humidity_aux", domain::Unit::PctRh, 2000}))
+// src/config/fakehw_table.hpp
+NODE_FAKE_I2C_ARGS(drivers::fake::FakeSht31Device, sht31_device, (timer), drivers::Sht31::kAddrA)
+```
+
+**既存のクラスへの変更が0であることの確かめ方**
+
+```sh
+git diff --numstat main...feature/add-sht31 -- src firmware tests   # 既存のファイルはどれも「追加1・削除0」
+git diff --diff-filter=M --name-only main...feature/add-sht31 -- src firmware tests
+# → src/config の4つ（表2つと include 2つ）と CMakeLists.txt の3つだけ
+```
+
+構成表を「1行が1台」の表にしたのは、P8a の前のリファクタリング（PR #8、#145）です。それまでの構成表はクラスで、機器ごとにメンバー・初期化子・一覧の配列を書き足す必要がありました。
 
 ## 構成
 
