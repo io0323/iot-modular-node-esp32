@@ -12,8 +12,8 @@ namespace node::infra {
 /// @brief トピック（iot/v1/{site}/{device_id}/{kind}）と、kind ごとの QoS・retain（共通仕様 第2章）。
 class Topics {
  public:
-  using TopicString = support::FixedString<96>;
-  static constexpr std::string_view kDefaultSite = "home";
+  using TopicString = support::FixedString<96>;              ///< トピックの文字列
+  static constexpr std::string_view kDefaultSite = "home";  ///< 既定の site
 
   /// @brief トピックを組み立てる。
   /// @param site サイト名（既定 "home"）
@@ -21,20 +21,28 @@ class Topics {
   Topics(std::string_view site, std::string_view device_id);
 
   /// @brief 発行するトピック。
+  /// @param k 種類
+  /// @return トピック
   [[nodiscard]] std::string_view of(Kind k) const { return topics_[index_of(k)].view(); }
   /// @brief 購読する cmd のトピック。
+  /// @return トピック
   [[nodiscard]] std::string_view cmd() const { return cmd_.view(); }
   /// @brief 組み立てられたか（長すぎる site などで失敗する）。
+  /// @return 組み立てられたら true
   [[nodiscard]] bool ok() const { return ok_; }
 
   /// @brief kind ごとの QoS（telemetry だけ 0）。
+  /// @param k 種類
+  /// @return QoS
   static constexpr Qos qos_of(Kind k) { return k == Kind::Telemetry ? Qos::AtMostOnce : Qos::AtLeastOnce; }
   /// @brief kind ごとの retain（state だけ retain）。
+  /// @param k 種類
+  /// @return retain するなら true
   static constexpr bool retain_of(Kind k) { return k == Kind::State; }
 
  private:
   std::array<TopicString, kKindCount> topics_{};
-  TopicString cmd_{};
+  TopicString cmd_;
   bool ok_{true};
 };
 

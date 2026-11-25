@@ -10,7 +10,9 @@ RuleEngine::RuleEngine(std::span<const domain::Rule> rules)
 std::optional<domain::Level> RuleEngine::step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
                                               std::uint64_t now_ms, bool active) {
   // パルスは時刻で数え続ける。長さを過ぎたら終わり
-  if (st.pulse_start_ms && now_ms - *st.pulse_start_ms >= r.pulse_ms) st.pulse_start_ms.reset();
+  if (st.pulse_start_ms && now_ms - *st.pulse_start_ms >= r.pulse_ms) {
+    st.pulse_start_ms.reset();
+  }
 
   if (!value) {
     // 不明：提案を出さず、実行中のパルスも止める（クールダウンはパルスの開始から数え続ける）
@@ -24,17 +26,22 @@ std::optional<domain::Level> RuleEngine::step(const domain::Rule& r, State& st, 
     return std::nullopt;
   }
 
-  if (r.pulse_ms == 0) {
-    if (!st.on && domain::enters(r, *value)) {
-      st.on = true;
-    } else if (st.on && domain::exits(r, *value)) {
-      st.on = false;
-    }
-    return st.on ? std::optional<domain::Level>(r.level) : std::nullopt;
-  }
+  return r.pulse_ms == 0 ? step_hysteresis(r, st, *value) : step_pulse(r, st, *value, now_ms);
+}
 
+std::optional<domain::Level> RuleEngine::step_hysteresis(const domain::Rule& r, State& st, std::int32_t value) {
+  if (!st.on && domain::enters(r, value)) {
+    st.on = true;
+  } else if (st.on && domain::exits(r, value)) {
+    st.on = false;
+  }
+  return st.on ? std::optional<domain::Level>(r.level) : std::nullopt;
+}
+
+std::optional<domain::Level> RuleEngine::step_pulse(const domain::Rule& r, State& st, std::int32_t value,
+                                                    std::uint64_t now_ms) {
   const bool cooling = st.last_pulse_ms && now_ms - *st.last_pulse_ms < r.cooldown_ms;
-  if (!st.pulse_start_ms && !cooling && domain::enters(r, *value)) {
+  if (!st.pulse_start_ms && !cooling && domain::enters(r, value)) {
     st.pulse_start_ms = now_ms;
     st.last_pulse_ms = now_ms;
   }
@@ -48,15 +55,20 @@ void RuleEngine::evaluate(const domain::ReadingStore& store, std::uint64_t now_m
     const domain::Rule& r = rules_[i];
     const bool active = rules_enabled && (!r.lighting || lighting_enabled);
     const auto level = step(r, states_[i], store.good_value(r.channel, now_ms), now_ms, active);
-    if (!level) continue;
+    if (!level) {
+      continue;
+    }
+    const domain::Level lv = *level;
     bool merged = false;
     for (Proposal& p : out) {
       if (p.actuator == r.actuator) {
-        p.level = std::max(p.level, *level);  // 複数のルールなら大きい方
+        p.level = std::max(p.level, lv);  // 複数のルールなら大きい方
         merged = true;
       }
     }
-    if (!merged) (void)out.push_back(Proposal{r.actuator, *level});
+    if (!merged) {
+      (void)out.push_back(Proposal{r.actuator, lv});
+    }
   }
 }
 

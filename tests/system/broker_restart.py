@@ -15,6 +15,10 @@ Mosquitto を docker compose stop／start で止めて戻し、observer で購�
 
 ブローカー自身を止めると LWT は出せない（#77）ので、LWT は 5 で確かめる。
 
+取りこぼし対策（open-questions #86・#87）：本体の再接続はジッターなしで、切れてから 1・3・7・15・31・63 秒後に試す（#69）。
+止めておく時間をこの予定から選び、ブローカーを戻してから本体の次の試行まで5秒以上空ける。observer はブローカーを戻したら
+100ms ごとに接続を試し、本体の次の試行より前に購読し直せたことを確かめてから判定に進む。間に合わなければ環境の要因として失敗にする。
+
 使い方（リポジトリの直下で）：
     IOTSPEC_MQTT_PASSWORD=iotspec-dev uv run tests/system/broker_restart.py [--binary ./build/host/mcu_cpp_01]
 """
@@ -37,6 +41,12 @@ import paho.mqtt.client as mqtt
 DEVICE_ID = "mcu-cpp-01"
 COMPOSE_FILE = "external/iot-common-spec/docker-compose.yml"
 RECONNECT_LIMIT_S = 60.0
+# 本体が切れてから MQTT の接続を試す時刻（秒）。待ちは 1・2・4・8・16・32・60 秒（#69・#87）
+RETRY_SCHEDULE_S = (1.0, 3.0, 7.0, 15.0, 31.0, 63.0, 123.0)
+# ブローカーを戻してから本体の次の試行までに空ける時間
+MIN_GAP_S = 5.0
+# 前の試行がブローカーの起動と重ならないための余裕
+MIN_AFTER_PREV_S = 1.0
 
 
 @dataclass
@@ -58,21 +68,25 @@ class Observer:
     received: list[Received] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
     connected: threading.Event = field(default_factory=threading.Event)
+    subscribed: threading.Event = field(default_factory=threading.Event)
+    disconnected_at: float | None = None  # 最後に切れた時刻（time.monotonic）
+    subscribed_at: float | None = None  # 最後に購読できた時刻（time.monotonic）
 
     def __post_init__(self) -> None:
         self.prefix = f"iot/v1/{self.site}/{DEVICE_ID}/"
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"observer-broker-restart-{os.getpid()}")
         self.client.username_pw_set("observer", self.password)
-        # ブローカーが戻ったらすぐにつなぎ直す（ホスト版より先に購読し直すため）
-        self.client.reconnect_delay_set(min_delay=0.1, max_delay=0.2)  # type: ignore[arg-type]
+        # ブローカーが戻ったら 100ms ごとに接続を試す（本体より先に購読し直すため。#86）
+        self.client.reconnect_delay_set(min_delay=0.1, max_delay=0.1)  # type: ignore[arg-type]
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.client.on_subscribe = self._on_subscribe
         self.client.on_message = self._on_message
 
     def start(self) -> None:
         self.client.connect(self.host, self.port, keepalive=10)
         self.client.loop_start()
-        if not self.connected.wait(10):
+        if not self.subscribed.wait(10):
             raise RuntimeError("observer がブローカーに接続できない")
 
     def stop(self) -> None:
@@ -87,6 +101,12 @@ class Observer:
 
     def _on_disconnect(self, _client, _userdata, _flags, _reason_code, _properties) -> None:
         self.connected.clear()
+        self.subscribed.clear()
+        self.disconnected_at = time.monotonic()
+
+    def _on_subscribe(self, _client, _userdata, _mid, _reason_codes, _properties) -> None:
+        self.subscribed_at = time.monotonic()
+        self.subscribed.set()
 
     def _on_message(self, _client, _userdata, msg) -> None:
         try:
@@ -115,6 +135,18 @@ def wait_for(pred, timeout: float, step: float = 0.05):
     return None
 
 
+def plan_outage(down: float) -> float:
+    """止めておく時間から、本体が次に接続を試す時刻（切れてからの秒）を求める。条件に合わなければ例外。"""
+    prev = max((t for t in RETRY_SCHEDULE_S if t <= down), default=0.0)
+    nxt = min(t for t in RETRY_SCHEDULE_S if t > down)
+    if nxt - down < MIN_GAP_S or (prev > 0 and down - prev < MIN_AFTER_PREV_S):
+        raise SystemExit(
+            f"--down {down:g} は使えない：前の試行 {prev:g} 秒・次の試行 {nxt:g} 秒。"
+            f"ブローカーを戻してから次の試行まで {MIN_GAP_S:g} 秒以上空く値を選ぶ（例：20）"
+        )
+    return nxt
+
+
 def code(r: Received) -> str:
     return r.message.get("payload", {}).get("code", "")
 
@@ -141,8 +173,10 @@ def main() -> int:
     ap.add_argument("--log", default="broker-restart-log.jsonl", help="ホスト版のログ（JSON Lines）")
     ap.add_argument("--stop-at", type=float, default=5.0, help="ホスト版の起動からブローカーを止めるまでの秒数")
     ap.add_argument("--fault-at", type=float, default=8.0, help="ホスト版の起動から土壌水分センサーを故障させるまでの秒数")
-    ap.add_argument("--down", type=float, default=20.0, help="ブローカーを止めておく秒数")
+    ap.add_argument("--down", type=float, default=20.0,
+                    help="ブローカーを止めておく秒数（本体が切れてから数える。次の試行まで5秒以上空く値）")
     args = ap.parse_args()
+    next_attempt = plan_outage(args.down)
 
     password = os.environ.get("IOTSPEC_MQTT_PASSWORD")
     if not password:
@@ -183,10 +217,20 @@ def main() -> int:
         print(f"ブローカーを止める（起動から {time.monotonic() - t0:.1f} 秒）")
         compose("stop", "mosquitto")
         stopped_count = len(obs.snapshot())
-        time.sleep(args.down)
-        print(f"ブローカーを戻す（起動から {time.monotonic() - t0:.1f} 秒）")
+        # 本体が切れた時刻は、observer が切れた時刻で見積もる（同じブローカーから同時に切られる）
+        t_lost = obs.disconnected_at if obs.disconnected_at is not None else time.monotonic()
+        time.sleep(max(0.0, t_lost + args.down - time.monotonic()))
+        print(f"ブローカーを戻す（切れてから {time.monotonic() - t_lost:.1f} 秒。本体の次の試行は {next_attempt:g} 秒）")
+        t_start_cmd = time.monotonic()
         compose("start", "mosquitto")
-        t_start = time.monotonic()
+        t_start = time.monotonic()  # docker compose start が戻った時刻（再接続までの秒数はここから数える）
+        deadline = t_lost + next_attempt
+        if not obs.subscribed.wait(max(0.0, deadline - time.monotonic())) or (obs.subscribed_at or 1e18) >= deadline:
+            print(f"[環境の要因] observer が本体の次の試行（切れてから {next_attempt:g} 秒）までに購読し直せなかった。"
+                  "Docker・Mosquitto の起動の遅れを確かめてから流し直す", file=sys.stderr)
+            return 3
+        print(f"  observer は docker compose start から {obs.subscribed_at - t_start_cmd:.1f} 秒で購読し直した"
+              f"（本体の次の試行の {deadline - obs.subscribed_at:.1f} 秒前）")
 
         restored = wait_for(
             lambda: next((r for r in obs.snapshot()[stopped_count:] if mine(r) and code(r) == "UPSTREAM_RESTORED"), None),

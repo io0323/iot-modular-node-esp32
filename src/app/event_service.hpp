@@ -33,9 +33,9 @@ constexpr std::string_view to_string(Severity s) {
 ///   保持の後ろに入れる。この2件は32件に数えない
 class EventService {
  public:
-  static constexpr std::size_t kCapacity = 32;
-  static constexpr std::size_t kDetailMax = 192;
-  static constexpr std::size_t kMessageMax = 768;
+  static constexpr std::size_t kCapacity = 32;     ///< 保持する件数（#8）
+  static constexpr std::size_t kDetailMax = 192;   ///< detail の最大長
+  static constexpr std::size_t kMessageMax = 768;  ///< 送り直しに写す電文の最大長
 
   /// @brief イベントをためる。あふれたら BOOT を除く中で最も古いものを捨てる。
   /// @param code コード（例："BOOT"）
@@ -48,8 +48,10 @@ class EventService {
             std::string_view channel = {});
 
   /// @brief ためたイベントを送れるだけ送る。
+  /// @param publisher 送信の窓口
   void flush(Publisher& publisher);
   /// @brief PUBACK を受けた（確認が取れた）。
+  /// @param token 送ったときのトークン
   void on_delivered(std::uint32_t token);
   /// @brief 接続した（LOST・RESTORED を入れる）。
   /// @param stamp 接続した時刻
@@ -58,26 +60,33 @@ class EventService {
   /// @param stamp 切れた時刻
   void on_disconnected(const infra::Stamp& stamp);
 
+  /// @brief 送っていない件数（LOST・RESTORED を含む）。
+  /// @return 件数
   [[nodiscard]] std::size_t pending() const { return queue_.size(); }
+  /// @brief 送って確認待ちの件数。
+  /// @return 件数
   [[nodiscard]] std::size_t inflight() const { return inflight_.size(); }
   /// @brief 捨てた件数の合計。
+  /// @return 件数
   [[nodiscard]] std::uint32_t dropped() const { return dropped_total_; }
   /// @brief 最初の接続の前に捨てた件数。
+  /// @return 件数
   [[nodiscard]] std::uint32_t dropped_before_first_connect() const { return dropped_before_connect_; }
   /// @brief BOOT を送ったか。
+  /// @return 送っていれば true
   [[nodiscard]] bool boot_sent() const { return boot_sent_; }
 
  private:
   enum class Role : std::uint8_t { Normal, Boot, Lost, Restored };
   struct Pending {
-    support::FixedString<32> code{};
+    support::FixedString<32> code;
     Severity severity{Severity::Info};
-    support::FixedString<kDetailMax> detail{};
-    support::FixedString<32> channel{};
+    support::FixedString<kDetailMax> detail;
+    support::FixedString<32> channel;
     infra::Stamp stamp{};
     Role role{Role::Normal};
     bool built{false};  ///< 組み立て済み（送り直し。message と seq を変えない）
-    support::FixedString<kMessageMax> message{};
+    support::FixedString<kMessageMax> message;
     std::uint32_t seq{0};
   };
   struct Inflight {
@@ -88,7 +97,7 @@ class EventService {
   [[nodiscard]] std::size_t normal_count() const;
   void drop_oldest();
   bool insert_front(const Pending& p);
-  support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
+  static support::Result<Publisher::Sent> send(Publisher& publisher, const Pending& p);
 
   support::StaticVector<Pending, kCapacity + 2> queue_{};
   support::StaticVector<Inflight, kCapacity> inflight_{};

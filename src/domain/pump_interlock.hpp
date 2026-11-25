@@ -13,7 +13,7 @@ namespace node::domain {
 /// （リース切れ・release・level 0）、かつ停止から60秒経った」後だけ。両方がそろった時点を「解除」とする（#17）。
 class PumpInterlock final : public IInterlock {
  public:
-  static constexpr std::uint32_t kRestartHoldMs = 60U * 1000U;
+  static constexpr std::uint32_t kRestartHoldMs = 60U * 1000U;  ///< 止めてから再びオンにできるまでの時間
 
   /// @brief 遷移。
   enum class Transition : std::uint8_t { None, Activated, Released };
@@ -21,7 +21,7 @@ class PumpInterlock final : public IInterlock {
   /// @brief update の結果。
   struct Output {
     Level level{0};  ///< 出してよい出力
-    Transition transition{Transition::None};
+    Transition transition{Transition::None};  ///< 効いた・解けた（なければ None）
   };
 
   /// @brief インターロックを作る。
@@ -31,6 +31,7 @@ class PumpInterlock final : public IInterlock {
   /// @brief 要求された出力から、出してよい出力を決める。
   /// @param requested 要求
   /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 出してよい出力と遷移
   Output update(Level requested, std::uint64_t now_ms);
 
   [[nodiscard]] std::string_view rule() const override { return "max_on_s"; }
@@ -38,7 +39,10 @@ class PumpInterlock final : public IInterlock {
   [[nodiscard]] bool engaged() const override { return active_; }
 
   /// @brief インターロックが効いているか（停止中で、まだ解除していない）。
+  /// @return 効いていれば true
   [[nodiscard]] bool active() const { return active_; }
+  /// @brief 連続出力の上限秒。
+  /// @return 秒数
   [[nodiscard]] std::uint32_t max_on_s() const { return max_on_ms_ / 1000U; }
 
  private:

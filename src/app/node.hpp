@@ -32,15 +32,15 @@ namespace node::app {
 
 /// @brief Node の設定。文字列の寿命はプログラム全体。
 struct NodeConfig {
-  std::string_view device_id{"mcu-cpp-01"};
-  std::string_view site{infra::Topics::kDefaultSite};
+  std::string_view device_id{"mcu-cpp-01"};             ///< device_id（MQTT の client id も同じ）
+  std::string_view site{infra::Topics::kDefaultSite};  ///< トピックの site
   std::string_view username{"mcu-cpp-01"};  ///< MQTT のユーザー名は device_id と同じ（ACL が %u を使う）
-  std::string_view password{};
-  std::string_view fw_version{"0.1"};
+  std::string_view password;           ///< MQTT のパスワード
+  std::string_view fw_version{"0.1"};  ///< state の fw_version
   std::string_view reset_reason{"power_on"};  ///< BOOT の detail.reset_reason
   std::string_view platform_reason{"HOST"};   ///< BOOT の detail.platform_reason
-  std::uint16_t keepalive_s{10};
-  std::uint32_t diag_interval_ms{10000};
+  std::uint16_t keepalive_s{10};          ///< MQTT の keepalive（秒）
+  std::uint32_t diag_interval_ms{10000};  ///< 診断のログ（diag）を出す間隔
 };
 
 /// @brief 作品02のアプリ全体。サービスを組み立て、tick で1周ずつ動かす。アプリのロジックは1つのスレッドだけで動かす。
@@ -49,12 +49,22 @@ struct NodeConfig {
 /// → ローカルルール → 調停（ControlArbiter）→ telemetry → 送り直し待ちとイベントの送信。
 class Node {
  public:
-  static constexpr std::size_t kMaxInboundPerTick = 16;
+  static constexpr std::size_t kMaxInboundPerTick = 16;  ///< 1周で読む cmd の上限
 
+  /// @brief サービスを組み立てる（機器の初期化と接続は start と tick で行う）。
+  /// @param config 設定
+  /// @param registry 機器の一覧
+  /// @param link MQTT の接続
+  /// @param network ネットワーク（Wi-Fi）
+  /// @param sync 時刻の同期
+  /// @param clock 単調時計
+  /// @param rng 乱数（boot_id・msg_id）
+  /// @param log ログ
   Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link, infra::INetwork& network,
        const infra::ITimeSync& sync, const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log);
 
   /// @brief 機器を初期化し、BOOT をためる。
+  /// @return 起動を続けられなければ失敗（機器の故障は起動を止めない）
   support::Result<void> start();
   /// @brief 1周分動かす（10ms ごとに呼ぶ）。
   void tick();
@@ -64,20 +74,46 @@ class Node {
   /// @brief ボタンの短押し（P3 で GPIO から呼ぶ。P2 はテストとデバッグ入力から）。
   void press_button();
   /// @brief 本体の手動操作（手動モードのときだけ受け付ける）。
+  /// @param id アクチュエーターの ID
+  /// @param level 出力（0–1000‰）
+  /// @return 受け付けたか、受け付けなかった理由
   ManualControl::Outcome set_manual(std::string_view id, domain::Level level);
 
+  /// @brief この起動の boot_id。
+  /// @return 8 桁の16進数
   [[nodiscard]] std::string_view boot_id() const { return envelope_.boot_id(); }
+  /// @brief いまのモード。
+  /// @return モード
   [[nodiscard]] domain::Mode mode() const { return modes_.mode(); }
+  /// @brief 調停（テスト・表示用）。
+  /// @return ControlArbiter
   [[nodiscard]] const ControlArbiter& arbiter() const { return arbiter_; }
+  /// @brief 最新の計測値。
+  /// @return ReadingStore
   [[nodiscard]] const domain::ReadingStore& readings() const { return store_; }
+  /// @brief 送信の窓口（カウンター）。
+  /// @return Publisher
   [[nodiscard]] const Publisher& publisher() const { return publisher_; }
+  /// @brief 読めずに捨てた cmd の件数。
+  /// @param r 理由
+  /// @return 件数
   [[nodiscard]] std::uint32_t discarded(infra::DiscardReason r) const {
     return discards_[static_cast<std::size_t>(r)];
   }
+  /// @brief 送っていないイベントの件数。
+  /// @return 件数
   [[nodiscard]] std::size_t pending_events() const { return events_.pending(); }
+  /// @brief イベントの保持。
+  /// @return EventService
   [[nodiscard]] const EventService& events() const { return events_; }
+  /// @brief 接続の状態機械。
+  /// @return ConnectionManager
   [[nodiscard]] const ConnectionManager& connection() const { return connection_; }
+  /// @brief 本体の UI。
+  /// @return UiService
   [[nodiscard]] const UiService& ui() const { return ui_; }
+  /// @brief 本体の手動操作。
+  /// @return ManualControl
   [[nodiscard]] const ManualControl& manual() const { return manual_; }
 
  private:
@@ -108,7 +144,7 @@ class Node {
   Publisher publisher_;
   domain::ReadingStore store_{};
   ControlArbiter arbiter_;
-  ModeManager modes_{};
+  ModeManager modes_;
   ManualControl manual_;
   RuleEngine rules_;
   SensorPoller poller_;

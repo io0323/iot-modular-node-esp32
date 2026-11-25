@@ -18,24 +18,24 @@ namespace node::drivers {
 
 /// @brief 補正係数（4.2.2 節 表16）。
 struct Bme280Calibration {
-  std::uint16_t dig_T1{0};
-  std::int16_t dig_T2{0};
-  std::int16_t dig_T3{0};
-  std::uint16_t dig_P1{0};
-  std::int16_t dig_P2{0};
-  std::int16_t dig_P3{0};
-  std::int16_t dig_P4{0};
-  std::int16_t dig_P5{0};
-  std::int16_t dig_P6{0};
-  std::int16_t dig_P7{0};
-  std::int16_t dig_P8{0};
-  std::int16_t dig_P9{0};
-  std::uint8_t dig_H1{0};
-  std::int16_t dig_H2{0};
-  std::uint8_t dig_H3{0};
-  std::int16_t dig_H4{0};
-  std::int16_t dig_H5{0};
-  std::int8_t dig_H6{0};
+  std::uint16_t dig_T1{0};  ///< 温度の補正係数
+  std::int16_t dig_T2{0};  ///< 温度の補正係数
+  std::int16_t dig_T3{0};  ///< 温度の補正係数
+  std::uint16_t dig_P1{0};  ///< 気圧の補正係数
+  std::int16_t dig_P2{0};  ///< 気圧の補正係数
+  std::int16_t dig_P3{0};  ///< 気圧の補正係数
+  std::int16_t dig_P4{0};  ///< 気圧の補正係数
+  std::int16_t dig_P5{0};  ///< 気圧の補正係数
+  std::int16_t dig_P6{0};  ///< 気圧の補正係数
+  std::int16_t dig_P7{0};  ///< 気圧の補正係数
+  std::int16_t dig_P8{0};  ///< 気圧の補正係数
+  std::int16_t dig_P9{0};  ///< 気圧の補正係数
+  std::uint8_t dig_H1{0};  ///< 湿度の補正係数
+  std::int16_t dig_H2{0};  ///< 湿度の補正係数
+  std::uint8_t dig_H3{0};  ///< 湿度の補正係数
+  std::int16_t dig_H4{0};  ///< 湿度（12 ビット）の補正係数
+  std::int16_t dig_H5{0};  ///< 湿度（12 ビット）の補正係数
+  std::int8_t dig_H6{0};  ///< 湿度の補正係数
 };
 
 /// @brief 生値（4 章、5.4.7〜5.4.9 節）。
@@ -50,20 +50,20 @@ struct Bme280Compensated {
   std::int32_t temperature_centi{0};  ///< 0.01 DegC（"5123" は 51.23 DegC）
   std::uint32_t pressure_q24_8{0};    ///< Pa の Q24.8（"24674867" は 96386.2 Pa）
   std::uint32_t humidity_q22_10{0};   ///< %RH の Q22.10（"47445" は 46.333 %RH）
-  std::int32_t t_fine{0};
+  std::int32_t t_fine{0};  ///< 温度の式の中間値（気圧・湿度の式が使う）
 };
 
 /// @brief 0x88〜0xA1（26 バイト）と 0xE1〜0xE7（7 バイト）から補正係数を読む（4.2.2 節 表16）。
 /// dig_H4・dig_H5 は 12 ビットの符号付き（表16）。上位の 8 ビット（0xE4・0xE6）を符号付きとして広げる。
-[[nodiscard]] Bme280Calibration parse_bme280_calibration(std::span<const std::uint8_t, 26> regs_88_a1,
-                                                         std::span<const std::uint8_t, 7> regs_e1_e7);
+[[nodiscard]] Bme280Calibration parse_bme280_calibration(std::span<const std::uint8_t, 26> c,
+                                                         std::span<const std::uint8_t, 7> h);
 
 /// @brief 0xF7〜0xFE（8 バイト）の burst read から生値を組み立てる（4 章、5.4.7〜5.4.9 節 表29〜31）。
-[[nodiscard]] Bme280Raw parse_bme280_raw(std::span<const std::uint8_t, 8> regs_f7_fe);
+[[nodiscard]] Bme280Raw parse_bme280_raw(std::span<const std::uint8_t, 8> d);
 
 /// @brief 4.2.3 節の整数の補正式（BME280_compensate_T_int32・BME280_compensate_P_int64・
 /// bme280_compensate_H_int32、コードの rev.1.1）で補正する。
-[[nodiscard]] Bme280Compensated compensate_bme280(const Bme280Calibration& cal, const Bme280Raw& raw);
+[[nodiscard]] Bme280Compensated compensate_bme280(const Bme280Calibration& k, const Bme280Raw& raw);
 
 /// @brief BME280 のドライバ。1台で temp_air・humidity・pressure の3チャネルを持つ。
 ///
@@ -87,14 +87,14 @@ class Bme280 final : public domain::ISensor {
   static constexpr std::uint8_t kConfigFilterOff = 0x00;  ///< filter = 000（表28）
   /// ctrl_meas：osrs_t = 001、osrs_p = 001（表23・24）、mode = 00（sleep）／01（forced）（表25）
   static constexpr std::uint8_t kCtrlMeasSleep = 0x24;
-  static constexpr std::uint8_t kCtrlMeasForced = 0x25;
+  static constexpr std::uint8_t kCtrlMeasForced = 0x25;  ///< ctrl_meas の強制モード（上の kCtrlMeasSleep の説明を参照）
   /// 起動時間 t_startup 2 ms（1.1 節 表1）
   static constexpr std::uint32_t kStartupMs = 2;
   /// 計測時間の最大（9.1 節の式で ×1・×1・×1：1.25 + 2.3 + 2.875 + 2.875 = 9.3 ms）を切り上げた値
   static constexpr std::uint32_t kMeasureMaxMs = 10;
   /// status のビットを見直す回数と間隔（データシートに定めがないので、P3 で決めた実装の値）
   static constexpr std::uint32_t kStatusPolls = 5;
-  static constexpr std::uint32_t kStatusPollIntervalMs = 1;
+  static constexpr std::uint32_t kStatusPollIntervalMs = 1;  ///< status を見直す間隔（ms。上の kStatusPolls の説明を参照）
 
   /// @brief ドライバを作る。
   /// @param dev I2C の宛先（アドレスは 0x76 か 0x77。6.2 節）
@@ -107,16 +107,19 @@ class Bme280 final : public domain::ISensor {
 
   [[nodiscard]] std::string_view id() const override { return "bme280"; }
   support::Result<void> init() override;
+  /// @copydoc domain::ISensor::read
   support::Result<std::size_t> read(std::span<domain::Reading> out) override;
   [[nodiscard]] std::chrono::milliseconds period() const override { return period_; }
   [[nodiscard]] std::span<const domain::ChannelSpec> channels() const override { return channels_; }
   support::Result<void> request_recovery() override;
 
+  /// @brief init で読んだ補正係数。
+  /// @return 補正係数
   [[nodiscard]] const Bme280Calibration& calibration() const { return cal_; }
 
  private:
-  support::Result<void> write_reg(std::uint8_t reg, std::uint8_t value);
-  support::Result<void> read_regs(std::uint8_t reg, std::span<std::uint8_t> out);
+  support::Result<void> write_reg(std::uint8_t reg, std::uint8_t value) const;
+  support::Result<void> read_regs(std::uint8_t reg, std::span<std::uint8_t> out) const;
   support::Result<void> wait_status_clear(std::uint8_t mask);
 
   hal::I2cDevice dev_;

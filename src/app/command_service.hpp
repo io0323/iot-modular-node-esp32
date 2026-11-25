@@ -29,13 +29,17 @@ constexpr std::string_view to_string(RejectReason r) {
 
 /// @brief cmd を処理した結果。
 struct CommandOutcome {
-  enum class Kind : std::uint8_t { Discarded, Ack };
-  Kind kind{Kind::Discarded};
+  /// @brief 結果の種類。
+  enum class Kind : std::uint8_t {
+    Discarded,  ///< ack を返さずに捨てた
+    Ack,        ///< ack を返す
+  };
+  Kind kind{Kind::Discarded};  ///< 結果の種類
   infra::DiscardReason discard{infra::DiscardReason::NotJson};  ///< Discarded のときの理由
   bool duplicate{false};                                       ///< 重複した cmd_id（実行していない）
-  domain::CmdDedupCache::Payload ack_payload{};                ///< cmd/ack の payload（"{...}"）
+  domain::CmdDedupCache::Payload ack_payload;                  ///< cmd/ack の payload（"{...}"）
   bool republish_state{false};                                 ///< state を出し直す（get_status）
-  std::optional<ModeChange> mode_change{};                     ///< モードを切り替えた（MODE_CHANGED と state）
+  std::optional<ModeChange> mode_change;  ///< モードを切り替えた（MODE_CHANGED と state）
   ControlArbiter::InterlockChanges interlock_changes{};        ///< 指令で起きたインターロックの遷移
 };
 
@@ -59,11 +63,13 @@ class CommandService {
 
  private:
   struct Exec {
-    std::optional<RejectReason> reject{};
+    std::optional<RejectReason> reject;
     bool output{false};  ///< 出力を扱う op（applied・limited を付ける）
     ControlArbiter::CommandResult result{};
   };
 
+  // op に関わらない確かめ（priority・op・origin・args・expires_at）。問題がなければ std::nullopt
+  static std::optional<RejectReason> precheck(const infra::CmdRequest& req, std::int64_t now_utc_ms);
   Exec execute(const infra::CmdRequest& req, std::uint64_t now_ms, std::int64_t now_utc_ms, CommandOutcome& out);
   Exec set_actuator(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);
   Exec release(const infra::CmdRequest& req, std::uint64_t now_ms, CommandOutcome& out);

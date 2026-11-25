@@ -26,26 +26,32 @@ namespace node::app {
 /// - cmd_ack・state：固定容量（8件）の送り直し待ちに入れて次の tick で送る。あふれたら捨てて数える
 class Publisher {
  public:
-  static constexpr std::size_t kMessageMax = 2048;
-  static constexpr std::size_t kRetryCapacity = 8;
+  static constexpr std::size_t kMessageMax = 2048;  ///< 電文の最大長
+  static constexpr std::size_t kRetryCapacity = 8;  ///< 送り直し待ちの容量（#15）
 
   /// @brief 数えている件数（診断用）。
   struct Counters {
-    std::uint32_t sent{0};
-    std::uint32_t telemetry_rate_dropped{0};
-    std::uint32_t telemetry_busy_dropped{0};
+    std::uint32_t sent{0};                    ///< 発行した電文
+    std::uint32_t telemetry_rate_dropped{0};  ///< 送信量の上限で捨てた telemetry
+    std::uint32_t telemetry_busy_dropped{0};  ///< 確認待ちの上限で捨てた telemetry
     std::uint32_t event_deferred{0};  ///< 上限で送れず、EventService に戻した event
-    std::uint32_t retry_queued{0};
+    std::uint32_t retry_queued{0};    ///< 送り直し待ちに入れた cmd_ack・state
     std::uint32_t retry_overflow{0};  ///< 送り直し待ちがあふれて捨てた cmd_ack・state
-    std::uint32_t encode_errors{0};
+    std::uint32_t encode_errors{0};   ///< バッファに収まらず組み立てられなかった電文
   };
 
   /// @brief 送れた電文。
   struct Sent {
     std::uint32_t token{0};  ///< QoS 1 のトークン（送り直し待ちに入れたときは 0）
-    std::uint32_t seq{0};
+    std::uint32_t seq{0};    ///< 付けた seq
   };
 
+  /// @brief 窓口を作る。
+  /// @param link MQTT の接続
+  /// @param envelope エンベロープ（seq・ts）
+  /// @param topics トピック
+  /// @param clock 単調時計（送信量の上限）
+  /// @param log 送った電文のログ
   Publisher(infra::IMqttLink& link, infra::EnvelopeFactory& envelope, const infra::Topics& topics,
             const infra::IClock& clock, infra::ILogSink& log);
 
@@ -56,8 +62,10 @@ class Publisher {
   /// @param stamp 電文の時刻（イベントの発生時刻など）。nullptr ならいま
   /// @return 送れた・送り直し待ちに入れたなら成功。未接続なら NotConnected、上限で送れなければ Busy
   template <typename F>
-  support::Result<Sent> publish(infra::Kind kind, F&& write_payload, const infra::Stamp* stamp = nullptr) {
-    if (!online()) return support::make_error(support::ErrorCode::NotConnected, "not connected");
+  support::Result<Sent> publish(infra::Kind kind, const F& write_payload, const infra::Stamp* stamp = nullptr) {
+    if (!online()) {
+      return support::make_error(support::ErrorCode::NotConnected, "not connected");
+    }
     const infra::Stamp st = stamp ? *stamp : envelope_.now();
     infra::JsonWriter w(buf_);
     envelope_.begin(w, kind, envelope_.peek_seq(kind), st);
@@ -72,12 +80,20 @@ class Publisher {
   }
 
   /// @brief 組み立て済みの電文を、seq・ts を変えずに送り直す（確認が取れなかった event。#71）。
+  /// @param kind 種類
+  /// @param message 組み立て済みの電文
+  /// @param seq 電文の seq（seq のカウンタは進めない）
+  /// @return 送れたら成功。未接続なら NotConnected、上限で送れなければ Busy
   support::Result<Sent> republish(infra::Kind kind, std::string_view message, std::uint32_t seq);
 
   /// @brief 直前に publish で組み立てた電文（送り直しのために写しを取る）。
+  /// @return 電文（次の publish で書き換わる）
   [[nodiscard]] std::string_view last_message() const { return {buf_.data(), built_len_}; }
 
   /// @brief seq を進めずに発行する（offline の state。共通仕様 v0.2.1 #29）。送信量の上限も数えない。
+  /// @param kind 種類
+  /// @param message 組み立て済みの電文
+  /// @return 送れなければ失敗
   support::Result<void> publish_uncounted(infra::Kind kind, std::string_view message);
 
   /// @brief 送り直し待ちを送れるだけ送る。
@@ -86,22 +102,32 @@ class Publisher {
   void clear_retries() { retries_.clear(); }
 
   /// @brief 発行してよいかを決める（ConnectionManager が接続を受け付けて true、切断で false）。
+  /// @param online 発行してよいなら true
   void set_online(bool online) { online_ = online; }
   /// @brief 発行してよいか（set_online が true で、リンクも接続中）。
+  /// @return 発行してよければ true
   [[nodiscard]] bool online() const { return online_ && link_.connected(); }
 
+  /// @brief 数えている件数。
+  /// @return Counters
   [[nodiscard]] const Counters& counters() const { return counters_; }
+  /// @brief 送り直し待ちの件数。
+  /// @return 件数
   [[nodiscard]] std::size_t retry_pending() const { return retries_.size(); }
 
  private:
   struct Pending {
     infra::Kind kind{infra::Kind::State};
-    support::FixedString<kMessageMax> message{};
+    support::FixedString<kMessageMax> message;
   };
 
   support::Result<Sent> send_built(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit);
   support::Result<std::uint32_t> send_now(infra::Kind kind, std::string_view message);
   support::Result<Sent> enqueue_retry(infra::Kind kind, std::string_view message, std::uint32_t seq);
+  // 上限（rate_limited）か確認待ちがいっぱいで送れなかった：telemetry は捨てる、event は保持へ、
+  // cmd_ack・state は送り直し待ちへ（#15）
+  support::Result<Sent> defer(infra::Kind kind, std::string_view message, std::uint32_t seq, bool commit,
+                              bool rate_limited);
   void log_tx(infra::Kind kind, std::string_view message);
 
   infra::IMqttLink& link_;

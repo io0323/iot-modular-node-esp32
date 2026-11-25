@@ -5,7 +5,7 @@
 種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
 機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P4）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
+**いまの段階（P5）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
 制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
 機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
 通信は「ネットワーク → 時刻の同期 → MQTT」の順に接続し、切れたら 1・2・4…60 秒の間隔でつなぎ直します。送れない間のイベントは32件まで保持し、
@@ -56,6 +56,23 @@ Mosquitto を `docker compose stop`／`start` で20秒止めて戻し、再接�
 ```sh
 IOTSPEC_MQTT_PASSWORD=iotspec-dev uv run tests/system/broker_restart.py
 ```
+
+## 品質ゲート
+
+clang-tidy・cppcheck・lizard・Doxygen・カバレッジは、Docker のイメージ（`tools/docker/quality.Dockerfile`）の中で `tools/quality.sh` が動かします（Mac も CI も同じ）。
+ほかに ThreadSanitizer（`host-tsan`）と最適化ビルド（`host-release`）のプリセットがあります。検査ごとの合格条件・抑止の一覧は [docs/quality.md](docs/quality.md) にあります。
+
+```sh
+tools/quality.sh all   # coverage・tidy・cppcheck・lizard・doxygen（出力は build/quality/）
+```
+
+| 検査 | いまの数値（P5） | 合格条件 |
+|---|---|---|
+| 行カバレッジ | domain 92.4%・app 95.9%（分岐 86.5%・86.0%） | 層ごとに 80% 以上 |
+| clang-tidy・cppcheck | 指摘 0 件 | 0 件 |
+| 循環的複雑度（lizard） | 最大 10（平均 2.4） | 10 以下 |
+| Doxygen（公開 API） | 警告 0 件 | 0 件 |
+| ThreadSanitizer | CTest・契約テスト・broker_restart.py で指摘 0 件（Paho の中だけの 2 件を抑止。open-questions #89・#93） | 0 件 |
 
 ## 動かし方（ホスト版）
 
@@ -139,6 +156,7 @@ src/
   config/         構成表（devices.cpp：模擬機器、fakehw.cpp：ドライバとフェイク）
   platform/host/  Paho・時計・時刻の同期・ネットワーク（模擬）・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
 tests/unit/  tests/integration/  tests/system/（broker_restart.py）
+tools/          品質のイメージ（docker/quality.Dockerfile）・quality.sh・TSan の抑止（tsan.supp）
 ```
 
 ## フェーズ
@@ -148,10 +166,10 @@ tests/unit/  tests/integration/  tests/system/（broker_restart.py）
 | P1 | ホスト版の骨組み、MQTT 接続、cmd の受け付け、CI での契約テスト | 完了（PR #1） |
 | P2 | ControlArbiter の5段の優先度、ModeManager、RuleEngine、インターロックの残り | 完了（PR #2） |
 | P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 完了（PR #3） |
-| P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 進行中 |
-| P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | — |
+| P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 完了（PR #4） |
+| P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | 進行中 |
 | P6 | ESP-IDF ターゲット版 | — |
 | P7 | エミュレーター（QEMU・Wokwi） | — |
 | P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)）、[未決の論点](docs/open-questions.md)。
+書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。

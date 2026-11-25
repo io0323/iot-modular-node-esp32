@@ -112,7 +112,9 @@ inline constexpr std::array<std::array<std::uint8_t, kFontWidth>, 95> kFont5x7{{
 
 /// @brief 文字のグリフ（範囲外の文字は '?'）。
 [[nodiscard]] constexpr const std::array<std::uint8_t, kFontWidth>& glyph_of(char c) {
-  if (c < kFontFirst || c > kFontLast) c = '?';
+  if (c < kFontFirst || c > kFontLast) {
+    c = '?';
+  }
   return kFont5x7[static_cast<std::size_t>(c - kFontFirst)];
 }
 

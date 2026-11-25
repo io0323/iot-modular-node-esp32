@@ -36,51 +36,68 @@ Result<Publisher::Sent> Publisher::enqueue_retry(Kind kind, std::string_view mes
 Result<Publisher::Sent> Publisher::send_built(Kind kind, std::string_view message, std::uint32_t seq, bool commit) {
   const bool retryable = kind == Kind::CmdAck || kind == Kind::State;
   // cmd_ack・state は、送り直し待ちがあるうちは順序を守るため後ろに並べる
-  if (retryable && commit && !retries_.empty()) return enqueue_retry(kind, message, seq);
-
-  const auto deferred = [&]() -> Result<Sent> {
-    if (kind == Kind::Telemetry) return make_error(ErrorCode::Busy, "telemetry dropped");
-    if (kind == Kind::Event) {
-      ++counters_.event_deferred;
-      return make_error(ErrorCode::Busy, "event deferred");
-    }
-    if (!commit) return make_error(ErrorCode::Busy, "busy");
+  if (retryable && commit && !retries_.empty()) {
     return enqueue_retry(kind, message, seq);
-  };
-
+  }
   if (!limiter_.try_take(kind, clock_.monotonic_ms())) {
-    if (kind == Kind::Telemetry) ++counters_.telemetry_rate_dropped;
-    return deferred();
+    return defer(kind, message, seq, commit, true);
   }
   const Result<std::uint32_t> r = send_now(kind, message);
   if (r) {
-    if (commit) envelope_.commit_seq(kind);
+    if (commit) {
+      envelope_.commit_seq(kind);
+    }
     return Sent{r.value(), seq};
   }
   if (r.error().code == ErrorCode::Busy) {
-    if (kind == Kind::Telemetry) ++counters_.telemetry_busy_dropped;
-    return deferred();
+    return defer(kind, message, seq, commit, false);
   }
   return r.error();
 }
 
+Result<Publisher::Sent> Publisher::defer(Kind kind, std::string_view message, std::uint32_t seq, bool commit,
+                                         bool rate_limited) {
+  if (kind == Kind::Telemetry) {
+    ++(rate_limited ? counters_.telemetry_rate_dropped : counters_.telemetry_busy_dropped);
+    return make_error(ErrorCode::Busy, "telemetry dropped");
+  }
+  if (kind == Kind::Event) {
+    ++counters_.event_deferred;
+    return make_error(ErrorCode::Busy, "event deferred");
+  }
+  if (!commit) {
+    return make_error(ErrorCode::Busy, "busy");
+  }
+  return enqueue_retry(kind, message, seq);
+}
+
 Result<Publisher::Sent> Publisher::republish(Kind kind, std::string_view message, std::uint32_t seq) {
-  if (!online()) return make_error(ErrorCode::NotConnected, "not connected");
+  if (!online()) {
+    return make_error(ErrorCode::NotConnected, "not connected");
+  }
   return send_built(kind, message, seq, false);
 }
 
 Result<void> Publisher::publish_uncounted(Kind kind, std::string_view message) {
-  if (!online()) return make_error(ErrorCode::NotConnected, "not connected");
+  if (!online()) {
+    return make_error(ErrorCode::NotConnected, "not connected");
+  }
   const Result<std::uint32_t> r = send_now(kind, message);
-  if (!r) return r.error();
+  if (!r) {
+    return r.error();
+  }
   return support::ok();
 }
 
 void Publisher::flush_retries() {
   while (!retries_.empty() && online()) {
-    Pending& p = retries_.front();
-    if (!limiter_.try_take(p.kind, clock_.monotonic_ms())) return;
-    if (!send_now(p.kind, p.message.view())) return;  // Busy などは次の tick に回す
+    Pending const& p = retries_.front();
+    if (!limiter_.try_take(p.kind, clock_.monotonic_ms())) {
+      return;
+    }
+    if (!send_now(p.kind, p.message.view())) {
+      return;  // Busy などは次の tick に回す
+    }
     retries_.erase_at(0);
   }
 }
@@ -91,7 +108,9 @@ void Publisher::log_tx(Kind kind, std::string_view message) {
   w.key("topic").string(topics_.of(kind));
   w.key("message").raw(message);
   w.end_object();
-  if (w.ok()) log_.write("tx", w.view());
+  if (w.ok()) {
+    log_.write("tx", w.view());
+  }
 }
 
 }  // namespace node::app

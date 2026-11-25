@@ -12,11 +12,14 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(NODE_SANITIZE "ASan・UBSan を付けてビルドする" OFF)
+option(NODE_SANITIZE_THREAD "ThreadSanitizer を付けてビルドする（NODE_SANITIZE とは一緒に使えない）" OFF)
+option(NODE_COVERAGE "gcov のカバレッジを取る（GCC）" OFF)
 option(NODE_BUILD_TESTS "テストをビルドする" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(warnings)
 include(sanitizers)
+include(coverage)
 
 # 実行ファイルは build/host/mcu_cpp_01 に置く（契約テストの前提。CLAUDE.md）
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

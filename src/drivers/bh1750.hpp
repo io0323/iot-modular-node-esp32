@@ -45,13 +45,14 @@ class Bh1750 final : public domain::ISensor {
 
   [[nodiscard]] std::string_view id() const override { return "bh1750"; }
   support::Result<void> init() override;
+  /// @copydoc domain::ISensor::read
   support::Result<std::size_t> read(std::span<domain::Reading> out) override;
   [[nodiscard]] std::chrono::milliseconds period() const override { return period_; }
   [[nodiscard]] std::span<const domain::ChannelSpec> channels() const override { return channel_; }
   support::Result<void> request_recovery() override;
 
  private:
-  support::Result<void> command(std::uint8_t opcode);
+  support::Result<void> command(std::uint8_t opcode) const;
 
   hal::I2cDevice dev_;
   hal::ITimer& timer_;

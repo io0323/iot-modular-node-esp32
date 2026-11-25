@@ -14,7 +14,9 @@ void HostRandom::fill(std::span<std::uint8_t> out) {
   std::size_t done = 0;
   while (done < out.size()) {
     const std::size_t n = (out.size() - done) < 256U ? (out.size() - done) : 256U;
-    if (getentropy(out.data() + done, n) != 0) std::abort();  // 乱数が取れないのは続けられない故障
+    if (getentropy(out.data() + done, n) != 0) {
+      std::abort();  // 乱数が取れないのは続けられない故障
+    }
     done += n;
   }
 }

@@ -1,6 +1,8 @@
 #include "infra/formats.hpp"
 
+#include <algorithm>
 #include <array>
+#include <utility>
 
 namespace node::infra {
 namespace {
@@ -9,23 +11,28 @@ constexpr bool is_lower(char c) { return c >= 'a' && c <= 'z'; }
 constexpr bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
 constexpr bool is_crockford(char c) {
-  if (is_digit(c)) return true;
-  if (c < 'A' || c > 'Z') return false;
+  if (is_digit(c)) {
+    return true;
+  }
+  if (c < 'A' || c > 'Z') {
+    return false;
+  }
   return c != 'I' && c != 'L' && c != 'O' && c != 'U';
 }
 
 // [a-z][a-z0-9]*
 constexpr bool is_word(std::string_view s) {
-  if (s.empty() || !is_lower(s[0])) return false;
-  for (char c : s) {
-    if (!is_lower(c) && !is_digit(c)) return false;
+  if (s.empty() || !is_lower(s[0])) {
+    return false;
   }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_lower(c) || is_digit(c); });
 }
 
 // 2桁の数字を読む。範囲外なら -1
 constexpr int two_digits(std::string_view s, std::size_t pos, int lo, int hi) {
-  if (!is_digit(s[pos]) || !is_digit(s[pos + 1])) return -1;
+  if (!is_digit(s[pos]) || !is_digit(s[pos + 1])) {
+    return -1;
+  }
   const int v = (s[pos] - '0') * 10 + (s[pos + 1] - '0');
   return (v < lo || v > hi) ? -1 : v;
 }
@@ -66,41 +73,52 @@ void put_digits(TsString& out, std::int64_t v, int width) {
     tmp[static_cast<std::size_t>(i)] = static_cast<char>('0' + static_cast<int>(v % 10));
     v /= 10;
   }
-  for (int i = 0; i < width; ++i) (void)out.push_back(tmp[static_cast<std::size_t>(i)]);
+  for (int i = 0; i < width; ++i) {
+    (void)out.push_back(tmp[static_cast<std::size_t>(i)]);
+  }
 }
 
 }  // namespace
 
 bool is_ulid(std::string_view s) {
-  if (s.size() != 26 || s[0] < '0' || s[0] > '7') return false;
-  for (char c : s) {
-    if (!is_crockford(c)) return false;
+  if (s.size() != 26 || s[0] < '0' || s[0] > '7') {
+    return false;
   }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_crockford(c); });
 }
 
 bool is_device_id(std::string_view s) {
   // ^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)?-[0-9]{2,}$
   const std::size_t last = s.rfind('-');
-  if (last == std::string_view::npos) return false;
+  if (last == std::string_view::npos) {
+    return false;
+  }
   const std::string_view number = s.substr(last + 1);
-  if (number.size() < 2) return false;
-  for (char c : number) {
-    if (!is_digit(c)) return false;
+  if (number.size() < 2) {
+    return false;
+  }
+  if (!std::ranges::all_of(number, [](char c) { return is_digit(c); })) {
+    return false;
   }
   const std::string_view head = s.substr(0, last);
   const std::size_t dash = head.find('-');
-  if (dash == std::string_view::npos) return is_word(head);
+  if (dash == std::string_view::npos) {
+    return is_word(head);
+  }
   return is_word(head.substr(0, dash)) && is_word(head.substr(dash + 1));
 }
 
 bool is_snake_id(std::string_view s) {
   // ^[a-z][a-z0-9]*(_[a-z0-9]+)*$
-  if (s.empty() || !is_lower(s[0]) || s.back() == '_') return false;
+  if (s.empty() || !is_lower(s[0]) || s.back() == '_') {
+    return false;
+  }
   char prev = s[0];
-  for (char c : s.substr(1)) {
+  for (char const c : s.substr(1)) {
     if (c == '_') {
-      if (prev == '_') return false;
+      if (prev == '_') {
+        return false;
+      }
     } else if (!is_lower(c) && !is_digit(c)) {
       return false;
     }
@@ -110,37 +128,52 @@ bool is_snake_id(std::string_view s) {
 }
 
 bool is_boot_id(std::string_view s) {
-  if (s.size() != 8) return false;
-  for (char c : s) {
-    if (!is_digit(c) && (c < 'a' || c > 'f')) return false;
+  if (s.size() != 8) {
+    return false;
   }
-  return true;
+  return std::ranges::all_of(s, [](char c) { return is_digit(c) || (c >= 'a' && c <= 'f'); });
 }
 
-std::optional<std::int64_t> parse_ts(std::string_view s) {
-  // YYYY-MM-DDTHH:MM:SS.mmmZ
-  if (s.size() != 24) return std::nullopt;
-  if (s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[19] != '.' ||
-      s[23] != 'Z') {
-    return std::nullopt;
+namespace {
+
+// YYYY-MM-DDTHH:MM:SS.mmmZ の区切りと、年・ミリ秒の数字がそろっているか（月日時分秒の範囲は two_digits で見る）
+bool ts_shape_ok(std::string_view s) {
+  if (s.size() != 24) {
+    return false;
   }
-  for (std::size_t i : {0U, 1U, 2U, 3U, 20U, 21U, 22U}) {
-    if (!is_digit(s[i])) return std::nullopt;
+  constexpr std::array<std::pair<std::size_t, char>, 7> kSeparators{
+      {{4, '-'}, {7, '-'}, {10, 'T'}, {13, ':'}, {16, ':'}, {19, '.'}, {23, 'Z'}}};
+  if (!std::ranges::all_of(kSeparators, [s](const auto& p) { return s[p.first] == p.second; })) {
+    return false;
+  }
+  constexpr std::array<std::size_t, 7> kDigits{0, 1, 2, 3, 20, 21, 22};
+  return std::ranges::all_of(kDigits, [s](std::size_t i) { return is_digit(s[i]); });
+}
+
+}  // namespace
+
+std::optional<std::int64_t> parse_ts(std::string_view s) {
+  if (!ts_shape_ok(s)) {
+    return std::nullopt;
   }
   const int month = two_digits(s, 5, 1, 12);
   const int day = two_digits(s, 8, 1, 31);
   const int hour = two_digits(s, 11, 0, 23);
   const int minute = two_digits(s, 14, 0, 59);
   const int second = two_digits(s, 17, 0, 59);
-  if (month < 0 || day < 0 || hour < 0 || minute < 0 || second < 0) return std::nullopt;
+  if (month < 0 || day < 0 || hour < 0 || minute < 0 || second < 0) {
+    return std::nullopt;
+  }
   const std::int64_t year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
   const std::int64_t millis = (s[20] - '0') * 100 + (s[21] - '0') * 10 + (s[22] - '0');
   const std::int64_t days = days_from_civil(year, month, day);
-  return ((days * 24 + hour) * 60 + minute) * 60000 + second * 1000 + millis;
+  return ((days * 24 + hour) * 60 + minute) * 60000 + static_cast<std::int64_t>(second) * 1000 + millis;
 }
 
 TsString format_ts(std::int64_t utc_ms) {
-  if (utc_ms < 0) utc_ms = 0;
+  if (utc_ms < 0) {
+    utc_ms = 0;
+  }
   const std::int64_t days = utc_ms / 86400000;
   std::int64_t rem = utc_ms % 86400000;
   const Civil c = civil_from_days(days);

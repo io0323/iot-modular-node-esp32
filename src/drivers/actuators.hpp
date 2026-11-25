@@ -24,24 +24,32 @@ namespace node::drivers {
 
 /// @brief PWM の設定。
 struct PwmConfig {
-  hal::Pin channel{0};
-  std::uint32_t freq_hz{1000};
-  std::uint8_t resolution_bits{10};
+  hal::Pin channel{0};               ///< PWM のチャネル
+  std::uint32_t freq_hz{1000};       ///< 周波数（Hz）
+  std::uint8_t resolution_bits{10};  ///< 分解能（ビット）
 };
 
 /// @brief PWM で出力するアクチュエーター。
 class PwmActuator final : public domain::IActuator {
  public:
+  /// @brief ドライバを作る。
+  /// @param pwm PWM
+  /// @param config チャネル・周波数・分解能
+  /// @param spec 仕様（寿命はプログラム全体）
   PwmActuator(hal::IPwm& pwm, PwmConfig config, const domain::ActuatorSpec& spec)
       : pwm_(pwm), config_(config), spec_(spec) {}
 
   [[nodiscard]] std::string_view id() const override { return spec_.id; }
   support::Result<void> init() override {
-    if (auto r = pwm_.configure(config_.channel, config_.freq_hz, config_.resolution_bits); !r) return r;
+    if (auto r = pwm_.configure(config_.channel, config_.freq_hz, config_.resolution_bits); !r) {
+      return r;
+    }
     return apply(0);
   }
   support::Result<void> apply(domain::Level level) override {
-    if (auto r = pwm_.set_duty(config_.channel, level_to_duty(level, config_.resolution_bits)); !r) return r;
+    if (auto r = pwm_.set_duty(config_.channel, level_to_duty(level, config_.resolution_bits)); !r) {
+      return r;
+    }
     level_ = level;
     return support::ok();
   }
@@ -58,22 +66,31 @@ class PwmActuator final : public domain::IActuator {
 /// @brief リレー（GPIO のオン・オフ）で出力するアクチュエーター。
 class RelayActuator final : public domain::IActuator {
  public:
+  /// @brief ドライバを作る。
+  /// @param gpio GPIO
+  /// @param pin リレーのピン
   /// @param active_high High でオンなら true（既定。#46）
+  /// @param spec 仕様（寿命はプログラム全体）
   RelayActuator(hal::IGpio& gpio, hal::Pin pin, bool active_high, const domain::ActuatorSpec& spec)
       : gpio_(gpio), pin_(pin), active_high_(active_high), spec_(spec) {}
 
   [[nodiscard]] std::string_view id() const override { return spec_.id; }
   support::Result<void> init() override {
-    if (auto r = gpio_.configure_output(pin_); !r) return r;
+    if (auto r = gpio_.configure_output(pin_); !r) {
+      return r;
+    }
     return apply(0);
   }
   support::Result<void> apply(domain::Level level) override {
     const bool on = level > 0;
-    if (auto r = gpio_.write(pin_, on == active_high_); !r) return r;
+    if (auto r = gpio_.write(pin_, on == active_high_); !r) {
+      return r;
+    }
     level_ = on ? domain::kLevelMax : domain::Level{0};
     return support::ok();
   }
-  /// オン・オフしかないので、オンのときは 1000 を返す
+  /// @brief いまの出力。
+  /// @return オン・オフしかないので、オンなら 1000、オフなら 0
   [[nodiscard]] domain::Level current() const override { return level_; }
   [[nodiscard]] const domain::ActuatorSpec& spec() const override { return spec_; }
 

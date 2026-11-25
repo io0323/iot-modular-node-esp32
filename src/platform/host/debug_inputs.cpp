@@ -9,17 +9,23 @@ namespace node::platform {
 namespace {
 
 std::optional<double> number(std::string_view s) {
-  if (s.empty()) return std::nullopt;
+  if (s.empty()) {
+    return std::nullopt;
+  }
   const std::string str(s);
   char* end = nullptr;
   const double v = std::strtod(str.c_str(), &end);
-  if (end != str.c_str() + str.size() || !std::isfinite(v)) return std::nullopt;
+  if (end != str.c_str() + str.size() || !std::isfinite(v)) {
+    return std::nullopt;
+  }
   return v;
 }
 
 std::optional<std::uint64_t> seconds_to_ms(std::string_view s) {
   const auto v = number(s);
-  if (!v || *v < 0) return std::nullopt;
+  if (!v || *v < 0) {
+    return std::nullopt;
+  }
   return static_cast<std::uint64_t>(std::llround(*v * 1000.0));
 }
 
@@ -27,22 +33,26 @@ std::optional<std::uint64_t> seconds_to_ms(std::string_view s) {
 bool split_at(std::string_view s, std::string_view& left, std::uint64_t& at_ms, bool at_required) {
   const std::size_t at = s.rfind('@');
   if (at == std::string_view::npos) {
-    if (at_required) return false;
+    if (at_required) {
+      return false;
+    }
     left = s;
     at_ms = 0;
     return true;
   }
   left = s.substr(0, at);
   const auto ms = seconds_to_ms(s.substr(at + 1));
-  if (!ms) return false;
+  if (!ms) {
+    return false;
+  }
   at_ms = *ms;
   return true;
 }
 
 void log_debug(infra::ILogSink& log, std::string_view what, std::string_view target, long long value,
                std::string_view result) {
-  std::string f = "{\"debug\":\"" + std::string(what) + "\",\"target\":\"" + std::string(target) +
-                  "\",\"value\":" + std::to_string(value) + ",\"result\":\"" + std::string(result) + "\"}";
+  std::string const f = R"({"debug":")" + std::string(what) + R"(","target":")" + std::string(target) +
+                        R"(","value":)" + std::to_string(value) + R"(,"result":")" + std::string(result) + "\"}";
   log.write("input", f);
 }
 
@@ -50,29 +60,49 @@ void log_debug(infra::ILogSink& log, std::string_view what, std::string_view tar
 
 bool DebugInputs::parse(std::string_view option, std::string_view value, std::string& error) {
   if (option == "--sim") {
-    std::string_view left;
-    std::uint64_t at = 0;
-    const std::size_t eq = value.find('=');
-    if (eq == std::string_view::npos || !split_at(value.substr(eq + 1), left, at, false)) {
-      error = "--sim <channel>=<value>[@<秒>]";
+    parse_sim(value, error);
+  } else if (option == "--sim-fault") {
+    parse_sim_fault(value, error);
+  } else if (option == "--press-at") {
+    const auto at = seconds_to_ms(value);
+    if (!at) {
+      error = "--press-at <秒>";
       return true;
     }
-    const std::string channel(value.substr(0, eq));
-    const auto v = number(left);
-    if (!v || channel.empty()) {
-      error = "--sim: 値かチャネルが違う: " + std::string(value);
-      return true;
-    }
-    actions_.push_back({at, Type::SetValue, channel, static_cast<std::int32_t>(std::llround(*v * 1000.0)), false});
-    return true;
+    actions_.push_back({*at, Type::Press, "", 0, false});
+  } else if (option == "--manual") {
+    parse_manual(value, error);
+  } else {
+    return false;
   }
-  if (option == "--sim-fault") {
+  return true;
+}
+
+void DebugInputs::parse_sim(std::string_view value, std::string& error) {
+  std::string_view left;
+  std::uint64_t at = 0;
+  const std::size_t eq = value.find('=');
+  if (eq == std::string_view::npos || !split_at(value.substr(eq + 1), left, at, false)) {
+    error = "--sim <channel>=<value>[@<秒>]";
+    return;
+  }
+  const std::string channel(value.substr(0, eq));
+  const auto v = number(left);
+  if (!v || channel.empty()) {
+    error = "--sim: 値かチャネルが違う: " + std::string(value);
+    return;
+  }
+  actions_.push_back({at, Type::SetValue, channel, static_cast<std::int32_t>(std::llround(*v * 1000.0)), false});
+}
+
+void DebugInputs::parse_sim_fault(std::string_view value, std::string& error) {
+  {
     std::string_view range;
     std::uint64_t unused = 0;
     const std::size_t at = value.rfind('@');
     if (at == std::string_view::npos) {
       error = "--sim-fault <センサーID>@<開始秒>[-<終了秒>]";
-      return true;
+      return;
     }
     const std::string id(value.substr(0, at));
     range = value.substr(at + 1);
@@ -81,44 +111,43 @@ bool DebugInputs::parse(std::string_view option, std::string_view value, std::st
     const auto end = dash == std::string_view::npos ? std::optional<std::uint64_t>(unused) : seconds_to_ms(range.substr(dash + 1));
     if (!start || !end || id.empty() || (dash != std::string_view::npos && *end <= *start)) {
       error = "--sim-fault: センサーIDか時刻が違う: " + std::string(value);
-      return true;
+      return;
     }
     actions_.push_back({*start, Type::FaultOn, id, 0, false});
-    if (dash != std::string_view::npos) actions_.push_back({*end, Type::FaultOff, id, 0, false});
-    return true;
-  }
-  if (option == "--press-at") {
-    const auto at = seconds_to_ms(value);
-    if (!at) {
-      error = "--press-at <秒>";
-      return true;
+    if (dash != std::string_view::npos) {
+      actions_.push_back({*end, Type::FaultOff, id, 0, false});
     }
-    actions_.push_back({*at, Type::Press, "", 0, false});
-    return true;
   }
-  if (option == "--manual") {
-    std::string_view left;
-    std::uint64_t at = 0;
-    const std::size_t eq = value.find('=');
-    if (eq == std::string_view::npos || !split_at(value.substr(eq + 1), left, at, true)) {
-      error = "--manual <id>=<level>@<秒>";
-      return true;
-    }
-    const auto v = number(left);
-    if (!v || *v < 0 || *v > domain::kLevelMax) {
-      error = "--manual: level は 0〜1000: " + std::string(value);
-      return true;
-    }
-    actions_.push_back({at, Type::Manual, std::string(value.substr(0, eq)), static_cast<std::int32_t>(*v), false});
-    return true;
+}
+
+void DebugInputs::parse_manual(std::string_view value, std::string& error) {
+  std::string_view left;
+  std::uint64_t at = 0;
+  const std::size_t eq = value.find('=');
+  if (eq == std::string_view::npos || !split_at(value.substr(eq + 1), left, at, true)) {
+    error = "--manual <id>=<level>@<秒>";
+    return;
   }
-  return false;
+  const auto v = number(left);
+  if (!v || *v < 0 || *v > domain::kLevelMax) {
+    error = "--manual: level は 0〜1000: " + std::string(value);
+    return;
+  }
+  actions_.push_back({at, Type::Manual, std::string(value.substr(0, eq)), static_cast<std::int32_t>(*v), false});
 }
 
 void DebugInputs::apply_due(std::uint64_t elapsed_ms, app::Node& node, IDebugTarget& target, infra::ILogSink& log) {
   for (Action& a : actions_) {
-    if (a.done || elapsed_ms < a.at_ms) continue;
+    if (a.done || elapsed_ms < a.at_ms) {
+      continue;
+    }
     a.done = true;
+    apply(a, node, target, log);
+  }
+}
+
+void DebugInputs::apply(const Action& a, app::Node& node, IDebugTarget& target, infra::ILogSink& log) {
+  {
     switch (a.type) {
       case Type::SetValue: {
         const bool ok = target.set_value(a.target, static_cast<double>(a.value) / 1000.0);

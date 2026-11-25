@@ -14,7 +14,7 @@ namespace node::drivers {
 /// @brief ホスト用の模擬センサー。決まった値を返す。1台で複数のチャネルを持てる（BME280 に当たるものは3チャネル）。
 class SimSensor final : public domain::ISensor {
  public:
-  static constexpr std::size_t kMaxChannels = 4;
+  static constexpr std::size_t kMaxChannels = 4;  ///< 1台のチャネルの上限
 
   /// @brief 模擬センサーを作る。
   /// @param id 機器の ID
@@ -26,28 +26,40 @@ class SimSensor final : public domain::ISensor {
 
   [[nodiscard]] std::string_view id() const override { return id_; }
   support::Result<void> init() override;
+  /// @copydoc domain::ISensor::read
   support::Result<std::size_t> read(std::span<domain::Reading> out) override;
   [[nodiscard]] std::chrono::milliseconds period() const override { return period_; }
   [[nodiscard]] std::span<const domain::ChannelSpec> channels() const override { return channels_; }
 
   /// @brief 値を変える（テスト・デバッグ入力用）。
+  /// @param index チャネルの位置
+  /// @param value_milli 値（1/1000 単位）
   void set_value(std::size_t index, std::int32_t value_milli);
   /// @brief チャネル名で値を変える（テスト・デバッグ入力用）。
+  /// @param channel チャネル名
+  /// @param value_milli 値（1/1000 単位）
   /// @return このセンサーのチャネルでなければ false
   bool set_channel_value(std::string_view channel, std::int32_t value_milli);
   /// @brief 品質を変える（テスト用。読めたうえで品質が good でない場合）。
+  /// @param q 品質
   void set_quality(domain::Quality q) { quality_ = q; }
   /// @brief 故障を注入する。true の間は read も init も失敗する（テスト・デバッグ入力用）。
+  /// @param fault 故障させるなら true
   void set_fault(bool fault) { fault_ = fault; }
   /// @brief init を呼んだ回数（再初期化のテスト用）。
+  /// @return 回数
   [[nodiscard]] std::uint32_t init_count() const { return init_count_; }
   /// @brief 次の n 回の read を失敗させる（読み直しのテスト用）。
+  /// @param n 回数
   void fail_next_reads(std::uint32_t n) { fail_next_reads_ = n; }
   /// @brief 回復の要求を数える。
+  /// @return いつも成功
   support::Result<void> request_recovery() override {
     ++recovery_requests_;
     return support::ok();
   }
+  /// @brief 回復を要求された回数。
+  /// @return 回数
   [[nodiscard]] std::uint32_t recovery_requests() const { return recovery_requests_; }
 
  private:
@@ -78,6 +90,8 @@ class SimActuator final : public domain::IActuator {
   }
   [[nodiscard]] domain::Level current() const override { return level_; }
   [[nodiscard]] const domain::ActuatorSpec& spec() const override { return spec_; }
+  /// @brief apply を呼ばれた回数。
+  /// @return 回数
   [[nodiscard]] std::uint32_t apply_count() const { return apply_count_; }
 
  private:

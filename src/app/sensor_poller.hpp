@@ -22,37 +22,48 @@ namespace node::app {
 /// - 省電力モードでは周期を5倍にする。切り替えた後の次の計測は「最後に計測した時刻＋新しい周期」（#40）
 class SensorPoller {
  public:
-  static constexpr std::size_t kMaxSensors = 8;
-  static constexpr std::size_t kMaxReadings = domain::ReadingStore::kMaxChannels;
-  static constexpr std::uint64_t kReinitIntervalMs = 30U * 1000U;
-  static constexpr std::uint32_t kAttemptsBeforeRecovery = 3;
+  static constexpr std::size_t kMaxSensors = 8;                                  ///< 扱えるセンサーの数
+  static constexpr std::size_t kMaxReadings = domain::ReadingStore::kMaxChannels;  ///< 1周で読むチャネルの上限
+  static constexpr std::uint64_t kReinitIntervalMs = std::uint64_t{30} * 1000U;    ///< 故障中の再初期化の間隔
+  static constexpr std::uint32_t kAttemptsBeforeRecovery = 3;                     ///< 回復を要求するまでの失敗の回数
 
   /// @brief センサーの故障・復旧（イベントの元）。
   struct SensorChange {
-    std::string_view channel;
-    bool fault{false};  ///< true：故障、false：復旧
+    std::string_view channel;  ///< チャネル
+    bool fault{false};         ///< true：故障、false：復旧
   };
 
   /// @brief 1回の tick の結果。
   struct Result {
     support::StaticVector<domain::Reading, kMaxReadings> readings{};  ///< 周期が来たチャネル（故障中は fault）
-    support::StaticVector<SensorChange, kMaxReadings> changes{};
+    support::StaticVector<SensorChange, kMaxReadings> changes{};  ///< 故障・復旧したチャネル
   };
 
+  /// @brief 計測を受け持つ。
+  /// @param sensors センサー（kMaxSensors 台まで）
+  /// @param store 計測値の書き込み先
   SensorPoller(std::span<domain::ISensor* const> sensors, domain::ReadingStore& store);
 
   /// @brief 周期の起点を決め、チャネルの周期を ReadingStore に登録する（最初の計測は now_ms）。
+  /// @param now_ms いまの単調時計
   void start(std::uint64_t now_ms);
   /// @brief 計測周期の倍率を変える（省電力モードは5倍）。
+  /// @param factor 倍率
   void set_period_factor(std::uint32_t factor);
+  /// @brief いまの計測周期の倍率。
+  /// @return 倍率
   [[nodiscard]] std::uint32_t period_factor() const { return factor_; }
 
   /// @brief 周期が来たセンサーを計測する。
+  /// @param now_ms いまの単調時計
+  /// @param out 結果の書き込み先（呼ぶたびに空にする）
   void tick(std::uint64_t now_ms, Result& out);
 
   /// @brief 計測に失敗した回数（読み直しを含む。診断用）。
+  /// @return 回数
   [[nodiscard]] std::uint32_t read_errors() const { return read_errors_; }
   /// @brief 回復を要求した回数（診断用）。
+  /// @return 回数
   [[nodiscard]] std::uint32_t recoveries() const { return recoveries_; }
 
  private:

@@ -112,14 +112,14 @@ Bme280Compensated compensate_bme280(const Bme280Calibration& k, const Bme280Raw&
   return out;
 }
 
-support::Result<void> Bme280::write_reg(std::uint8_t reg, std::uint8_t value) {
+support::Result<void> Bme280::write_reg(std::uint8_t reg, std::uint8_t value) const {
   // 6.2.1 節：レジスタのアドレスと値の組を書く
   const std::array<std::uint8_t, 2> tx{reg, value};
   hal::I2cTransaction t(*dev_.bus, *dev_.mutex);
   return t.write(dev_.addr, tx);
 }
 
-support::Result<void> Bme280::read_regs(std::uint8_t reg, std::span<std::uint8_t> out) {
+support::Result<void> Bme280::read_regs(std::uint8_t reg, std::span<std::uint8_t> out) const {
   // 6.2.2 節：アドレスを書いてから続けて読む（自動で増える）
   const std::array<std::uint8_t, 1> tx{reg};
   hal::I2cTransaction t(*dev_.bus, *dev_.mutex);
@@ -129,8 +129,12 @@ support::Result<void> Bme280::read_regs(std::uint8_t reg, std::span<std::uint8_t
 support::Result<void> Bme280::wait_status_clear(std::uint8_t mask) {
   for (std::uint32_t i = 0; i < kStatusPolls; ++i) {
     std::array<std::uint8_t, 1> status{};
-    if (auto r = read_regs(kRegStatus, status); !r) return r;
-    if ((status[0] & mask) == 0) return support::ok();
+    if (auto r = read_regs(kRegStatus, status); !r) {
+      return r;
+    }
+    if ((status[0] & mask) == 0) {
+      return support::ok();
+    }
     timer_.delay_ms(kStatusPollIntervalMs);
   }
   return not_ready();
@@ -138,38 +142,66 @@ support::Result<void> Bme280::wait_status_clear(std::uint8_t mask) {
 
 support::Result<void> Bme280::init() {
   initialized_ = false;
-  std::array<std::uint8_t, 1> id{};
-  if (auto r = read_regs(kRegId, id); !r) return r;
-  if (id[0] != kChipId) return support::make_error(support::ErrorCode::InvalidArgument, "bme280 chip id mismatch");
-  if (auto r = write_reg(kRegReset, kResetWord); !r) return r;
+  std::array<std::uint8_t, 1> chip_id{};
+  if (auto r = read_regs(kRegId, chip_id); !r) {
+    return r;
+  }
+  if (chip_id[0] != kChipId) {
+    return support::make_error(support::ErrorCode::InvalidArgument, "bme280 chip id mismatch");
+  }
+  if (auto r = write_reg(kRegReset, kResetWord); !r) {
+    return r;
+  }
   timer_.delay_ms(kStartupMs);
-  if (auto r = wait_status_clear(kStatusImUpdate); !r) return r;  // NVM の写しが終わるまで（表21）
+  if (auto r = wait_status_clear(kStatusImUpdate); !r) {
+    return r;  // NVM の写しが終わるまで（表21）
+  }
 
   std::array<std::uint8_t, 26> c{};
   std::array<std::uint8_t, 7> h{};
-  if (auto r = read_regs(kRegCalib0, c); !r) return r;
-  if (auto r = read_regs(kRegCalib26, h); !r) return r;
+  if (auto r = read_regs(kRegCalib0, c); !r) {
+    return r;
+  }
+  if (auto r = read_regs(kRegCalib26, h); !r) {
+    return r;
+  }
   cal_ = parse_bme280_calibration(c, h);
 
   // ctrl_hum は ctrl_meas を書いた後に効く（5.4.3 節）。config は sleep モードで書く（5.4.6 節）
-  if (auto r = write_reg(kRegCtrlHum, kCtrlHumX1); !r) return r;
-  if (auto r = write_reg(kRegConfig, kConfigFilterOff); !r) return r;
-  if (auto r = write_reg(kRegCtrlMeas, kCtrlMeasSleep); !r) return r;
+  if (auto r = write_reg(kRegCtrlHum, kCtrlHumX1); !r) {
+    return r;
+  }
+  if (auto r = write_reg(kRegConfig, kConfigFilterOff); !r) {
+    return r;
+  }
+  if (auto r = write_reg(kRegCtrlMeas, kCtrlMeasSleep); !r) {
+    return r;
+  }
   initialized_ = true;
   return support::ok();
 }
 
 support::Result<std::size_t> Bme280::read(std::span<domain::Reading> out) {
-  if (out.size() < 3) return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");
+  if (out.size() < 3) {
+    return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");
+  }
   if (!initialized_) {
-    if (auto r = init(); !r) return r.error();
+    if (auto r = init(); !r) {
+      return r.error();
+    }
   }
   // 強制モードで1回計測する（3.3.3 節）。待つ間はバスのミューテックスを放す
-  if (auto r = write_reg(kRegCtrlMeas, kCtrlMeasForced); !r) return r.error();
+  if (auto r = write_reg(kRegCtrlMeas, kCtrlMeasForced); !r) {
+    return r.error();
+  }
   timer_.delay_ms(kMeasureMaxMs);
-  if (auto r = wait_status_clear(kStatusMeasuring); !r) return r.error();
+  if (auto r = wait_status_clear(kStatusMeasuring); !r) {
+    return r.error();
+  }
   std::array<std::uint8_t, 8> d{};
-  if (auto r = read_regs(kRegData, d); !r) return r.error();  // 0xF7〜0xFE を1回で読む（4 章・4.1 節）
+  if (auto r = read_regs(kRegData, d); !r) {
+    return r.error();  // 0xF7〜0xFE を1回で読む（4 章・4.1 節）
+  }
 
   const Bme280Compensated c = compensate_bme280(cal_, parse_bme280_raw(d));
   // 単位の換算：0.01 degC → 1/1000 degC、Q22.10 %RH → 1/1000 %RH、Q24.8 Pa → 1/1000 hPa（四捨五入）

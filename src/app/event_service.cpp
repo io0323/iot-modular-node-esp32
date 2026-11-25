@@ -1,19 +1,21 @@
 #include "app/event_service.hpp"
 
+#include <algorithm>
 #include <array>
 
 namespace node::app {
 
 std::size_t EventService::normal_count() const {
-  std::size_t n = 0;
-  for (const Pending& p : queue_) n += (p.role == Role::Normal || p.role == Role::Boot) ? 1U : 0U;
-  return n;
+  return static_cast<std::size_t>(
+      std::ranges::count_if(queue_, [](const Pending& p) { return p.role == Role::Normal || p.role == Role::Boot; }));
 }
 
 void EventService::drop_oldest() {
   // BOOT・LOST・RESTORED を除く中で最も古いもの（#8）
   for (std::size_t i = 0; i < queue_.size(); ++i) {
-    if (queue_[i].role != Role::Normal) continue;
+    if (queue_[i].role != Role::Normal) {
+      continue;
+    }
     queue_.erase_at(i);
     ++dropped_total_;
     if (ever_connected_) {
@@ -26,9 +28,15 @@ void EventService::drop_oldest() {
 }
 
 bool EventService::insert_front(const Pending& p) {
-  if (queue_.full()) return false;
-  if (!queue_.push_back(p)) return false;
-  for (std::size_t i = queue_.size() - 1; i > 0; --i) queue_[i] = queue_[i - 1];
+  if (queue_.full()) {
+    return false;
+  }
+  if (!queue_.push_back(p)) {
+    return false;
+  }
+  for (std::size_t i = queue_.size() - 1; i > 0; --i) {
+    queue_[i] = queue_[i - 1];
+  }
   queue_[0] = p;
   return true;
 }
@@ -39,21 +47,31 @@ bool EventService::post(std::string_view code, Severity severity, std::string_vi
   p.severity = severity;
   p.stamp = stamp;
   p.role = code == "BOOT" ? Role::Boot : Role::Normal;
-  if (!p.code.assign(code) || !p.detail.assign(detail_json) || !p.channel.assign(channel)) return false;
-  if (normal_count() >= kCapacity) drop_oldest();
+  if (!p.code.assign(code) || !p.detail.assign(detail_json) || !p.channel.assign(channel)) {
+    return false;
+  }
+  if (normal_count() >= kCapacity) {
+    drop_oldest();
+  }
   return queue_.push_back(p);
 }
 
 support::Result<Publisher::Sent> EventService::send(Publisher& publisher, const Pending& p) {
-  if (p.built) return publisher.republish(infra::Kind::Event, p.message.view(), p.seq);
+  if (p.built) {
+    return publisher.republish(infra::Kind::Event, p.message.view(), p.seq);
+  }
   return publisher.publish(
       infra::Kind::Event,
       [&p](infra::JsonWriter& w) {
         w.begin_object();
         w.key("code").string(p.code.view());
         w.key("severity").string(to_string(p.severity));
-        if (!p.channel.empty()) w.key("channel").string(p.channel.view());
-        if (!p.detail.empty()) w.key("detail").raw(p.detail.view());
+        if (!p.channel.empty()) {
+          w.key("channel").string(p.channel.view());
+        }
+        if (!p.detail.empty()) {
+          w.key("detail").raw(p.detail.view());
+        }
         w.end_object();
       },
       &p.stamp);
@@ -63,8 +81,12 @@ void EventService::flush(Publisher& publisher) {
   while (!queue_.empty()) {
     const Pending& p = queue_.front();
     const auto r = send(publisher, p);
-    if (!r) return;  // 未接続・同期前・上限など。保持したまま次の機会に送る
-    if (p.role == Role::Boot) boot_sent_ = true;
+    if (!r) {
+      return;  // 未接続・同期前・上限など。保持したまま次の機会に送る
+    }
+    if (p.role == Role::Boot) {
+      boot_sent_ = true;
+    }
     if (r.value().token != 0 && !inflight_.full()) {
       Inflight f{};
       f.token = r.value().token;
@@ -92,7 +114,9 @@ void EventService::on_delivered(std::uint32_t token) {
 void EventService::on_disconnected(const infra::Stamp& stamp) {
   // 確認が取れなかった電文は、送った順のまま保持の先頭に戻す（#71）
   for (std::size_t k = inflight_.size(); k > 0; --k) {
-    if (normal_count() >= kCapacity) drop_oldest();
+    if (normal_count() >= kCapacity) {
+      drop_oldest();
+    }
     (void)insert_front(inflight_[k - 1].item);
   }
   inflight_.clear();

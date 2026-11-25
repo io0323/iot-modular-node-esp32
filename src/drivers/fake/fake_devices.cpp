@@ -1,6 +1,9 @@
 #include "drivers/fake/fake_devices.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <utility>
 
 #include "drivers/font5x7.hpp"
 #include "drivers/ssd1306.hpp"
@@ -89,7 +92,9 @@ double FakeBme280Device::temperature_double(const Bme280Calibration& k, std::int
                       static_cast<double>(k.dig_T2);
   const double d = static_cast<double>(adc_T) / 131072.0 - static_cast<double>(k.dig_T1) / 8192.0;
   const double var2 = d * d * static_cast<double>(k.dig_T3);
-  if (t_fine != nullptr) *t_fine = static_cast<std::int32_t>(var1 + var2);
+  if (t_fine != nullptr) {
+    *t_fine = static_cast<std::int32_t>(var1 + var2);
+  }
   return (var1 + var2) / 5120.0;
 }
 
@@ -101,7 +106,9 @@ double FakeBme280Device::pressure_double(const Bme280Calibration& k, std::int32_
   var2 = (var2 / 4.0) + (static_cast<double>(k.dig_P4) * 65536.0);
   var1 = (static_cast<double>(k.dig_P3) * var1 * var1 / 524288.0 + static_cast<double>(k.dig_P2) * var1) / 524288.0;
   var1 = (1.0 + var1 / 32768.0) * static_cast<double>(k.dig_P1);
-  if (var1 == 0.0) return 0;
+  if (var1 == 0.0) {
+    return 0;
+  }
   double p = 1048576.0 - static_cast<double>(adc_P);
   p = (p - (var2 / 4096.0)) * 6250.0 / var1;
   var1 = static_cast<double>(k.dig_P9) * p * p / 2147483648.0;
@@ -157,7 +164,9 @@ void FakeBme280Device::complete_measurement() {
 }
 
 void FakeBme280Device::on_write(std::span<const std::uint8_t> data) {
-  if (data.empty()) return;
+  if (data.empty()) {
+    return;
+  }
   pointer_ = data[0];
   // 6.2.1 節：アドレスと値の組を続けて書ける
   for (std::size_t i = 0; i + 1 < data.size(); i += 2) {
@@ -165,13 +174,17 @@ void FakeBme280Device::on_write(std::span<const std::uint8_t> data) {
     const std::uint8_t value = data[i + 1];
     (void)writes_.push_back(Write{reg, value});
     if (reg == Bme280::kRegReset) {
-      if (value == Bme280::kResetWord) reset();
+      if (value == Bme280::kResetWord) {
+        reset();
+      }
       continue;
     }
     regs_[reg] = value;
     if (reg == Bme280::kRegCtrlMeas && ((value & 0x03U) == 0x01U || (value & 0x03U) == 0x02U)) {
       measuring_left_ = measuring_polls_;
-      if (measuring_left_ == 0) complete_measurement();
+      if (measuring_left_ == 0) {
+        complete_measurement();
+      }
     }
   }
 }
@@ -182,7 +195,9 @@ void FakeBme280Device::on_read(std::span<std::uint8_t> out) {
       b = measuring_left_ > 0 ? Bme280::kStatusMeasuring : 0x00;
       if (measuring_left_ > 0) {
         ++status_reads_busy_;
-        if (--measuring_left_ == 0) complete_measurement();
+        if (--measuring_left_ == 0) {
+          complete_measurement();
+        }
       }
     } else {
       b = regs_[pointer_];
@@ -194,7 +209,7 @@ void FakeBme280Device::on_read(std::span<std::uint8_t> out) {
 // ---------------- BH1750FVI（ROHM Technical Note 2011.11 Rev.D）
 
 void FakeBh1750Device::on_write(std::span<const std::uint8_t> data) {
-  for (std::uint8_t op : data) {
+  for (std::uint8_t const op : data) {
     (void)commands_.push_back(op);
     if (op == 0x00) {  // Power Down
       powered_ = false;
@@ -215,25 +230,32 @@ void FakeBh1750Device::on_read(std::span<std::uint8_t> out) {
     ++early_reads_;
     v = 0;
   }
-  if (!out.empty()) out[0] = static_cast<std::uint8_t>(v >> 8U);  // High Byte [15:8]
-  if (out.size() > 1) out[1] = static_cast<std::uint8_t>(v & 0xFFU);  // Low Byte [7:0]
+  if (!out.empty()) {
+    out[0] = static_cast<std::uint8_t>(v >> 8U);  // High Byte [15:8]
+  }
+  if (out.size() > 1) {
+    out[1] = static_cast<std::uint8_t>(v & 0xFFU);  // Low Byte [7:0]
+  }
 }
 
 void FakeBh1750Device::set_lux(double lux) {
   const double c = std::round(lux * 1.2);
-  count_ = static_cast<std::uint16_t>(c < 0 ? 0 : (c > 65535 ? 65535 : c));
+  count_ = static_cast<std::uint16_t>(std::clamp(c, 0.0, 65535.0));
 }
 
 // ---------------- SSD1306（Rev 1.1）
 
 namespace {
 // 引数の数（9 章 表9-1）。ここで使うものだけ
+// コマンドの後に続く引数のバイト数（表にないコマンドは 0）
+constexpr std::array<std::pair<std::uint8_t, std::uint8_t>, 11> kParamCounts{{
+    {0x81, 1}, {0x8D, 1}, {0xA8, 1}, {0xD3, 1}, {0xD5, 1}, {0xD9, 1}, {0xDA, 1}, {0xDB, 1}, {0x20, 1},
+    {0x21, 2}, {0x22, 2},
+}};
+
 std::uint8_t params_of(std::uint8_t cmd) {
-  switch (cmd) {
-    case 0x81: case 0x8D: case 0xA8: case 0xD3: case 0xD5: case 0xD9: case 0xDA: case 0xDB: case 0x20: return 1;
-    case 0x21: case 0x22: return 2;
-    default: return 0;
-  }
+  const auto* it = std::ranges::find_if(kParamCounts, [cmd](const auto& p) { return p.first == cmd; });
+  return it == kParamCounts.end() ? 0 : it->second;
 }
 }  // namespace
 
@@ -244,15 +266,27 @@ void FakeSsd1306Device::command_byte(std::uint8_t b) {
     return;
   }
   pending_params_ = params_of(b);
-  if (b == 0xAE) display_on_ = false;
-  if (b == 0xAF) display_on_ = true;
-  if (b >= 0xB0 && b <= 0xB7) page_ = static_cast<std::uint8_t>(b - 0xB0);
-  if (b <= 0x0F) column_ = static_cast<std::uint8_t>((column_ & 0xF0U) | b);
-  if (b >= 0x10 && b <= 0x1F) column_ = static_cast<std::uint8_t>((column_ & 0x0FU) | ((b & 0x0FU) << 4U));
+  if (b == 0xAE) {
+    display_on_ = false;
+  }
+  if (b == 0xAF) {
+    display_on_ = true;
+  }
+  if (b >= 0xB0 && b <= 0xB7) {
+    page_ = static_cast<std::uint8_t>(b - 0xB0);
+  }
+  if (b <= 0x0F) {
+    column_ = static_cast<std::uint8_t>((column_ & 0xF0U) | b);
+  }
+  if (b >= 0x10 && b <= 0x1F) {
+    column_ = static_cast<std::uint8_t>((column_ & 0x0FU) | ((b & 0x0FU) << 4U));
+  }
 }
 
 void FakeSsd1306Device::on_write(std::span<const std::uint8_t> data) {
-  if (data.empty()) return;
+  if (data.empty()) {
+    return;
+  }
   const bool is_data = (data[0] & 0x40U) != 0;  // D/C#（8.1.5 節）
   for (std::size_t i = 1; i < data.size(); ++i) {
     if (!is_data) {
@@ -265,7 +299,7 @@ void FakeSsd1306Device::on_write(std::span<const std::uint8_t> data) {
 }
 
 void FakeSsd1306Device::on_read(std::span<std::uint8_t> out) {
-  for (std::uint8_t& b : out) b = 0;
+  std::ranges::fill(out, std::uint8_t{0});
 }
 
 support::FixedString<21> FakeSsd1306Device::row_text(std::size_t page) const {
@@ -287,7 +321,9 @@ support::FixedString<21> FakeSsd1306Device::row_text(std::size_t page) const {
   }
   // 右の空白を落とす
   std::size_t n = s.size();
-  while (n > 0 && s.view()[n - 1] == ' ') --n;
+  while (n > 0 && s.view()[n - 1] == ' ') {
+    --n;
+  }
   support::FixedString<21> t;
   (void)t.assign(s.view().substr(0, n));
   return t;

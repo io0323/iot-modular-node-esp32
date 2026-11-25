@@ -9,3 +9,12 @@ if(NODE_SANITIZE)
   add_compile_options(${NODE_SANITIZER_FLAGS})
   add_link_options(-fsanitize=address,undefined)
 endif()
+
+# ThreadSanitizer（host-tsan プリセットで有効）。依存ライブラリ（Paho）も同じ設定でビルドする。
+if(NODE_SANITIZE_THREAD)
+  if(NODE_SANITIZE)
+    message(FATAL_ERROR "NODE_SANITIZE と NODE_SANITIZE_THREAD は一緒に使えない")
+  endif()
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()

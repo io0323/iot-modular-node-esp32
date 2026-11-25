@@ -24,8 +24,8 @@ namespace node::platform {
 /// 切断の時点で表に残っているものを「確認が取れなかった電文」として表を空にする（P4）。
 class PahoMqttLink final : public infra::IMqttLink {
  public:
-  static constexpr std::size_t kInboundCapacity = 32;
-  static constexpr std::size_t kEventCapacity = 16;
+  static constexpr std::size_t kInboundCapacity = 32;  ///< 受信のキューの容量
+  static constexpr std::size_t kEventCapacity = 16;    ///< 接続状態の変化のキューの容量
 
   /// @brief クライアントを作る。
   /// @param server_uri "tcp://host:port"
@@ -34,8 +34,11 @@ class PahoMqttLink final : public infra::IMqttLink {
   ~PahoMqttLink() override;
   PahoMqttLink(const PahoMqttLink&) = delete;
   PahoMqttLink& operator=(const PahoMqttLink&) = delete;
+  PahoMqttLink(PahoMqttLink&&) = delete;
+  PahoMqttLink& operator=(PahoMqttLink&&) = delete;
 
   /// @brief クライアントを作れたか。
+  /// @return 作れたら true
   [[nodiscard]] bool ok() const { return client_ != nullptr; }
 
   support::Result<void> connect(const infra::ConnectOptions& options) override;
@@ -50,11 +53,14 @@ class PahoMqttLink final : public infra::IMqttLink {
   [[nodiscard]] std::size_t inflight() const override;
 
   /// @brief 受信か接続状態の変化が来るまで、最大 timeout だけ待つ。
+  /// @param timeout 待つ時間の上限
   void wait_for_activity(std::chrono::milliseconds timeout);
 
   /// @brief 大きすぎて捨てた受信の件数。
+  /// @return 件数
   [[nodiscard]] std::size_t oversized_dropped() const { return oversized_.load(); }
   /// @brief キューがいっぱいで捨てた受信の件数。
+  /// @return 件数
   [[nodiscard]] std::size_t inbound_dropped() const { return inbound_dropped_.load(); }
 
  private:
@@ -65,6 +71,8 @@ class PahoMqttLink final : public infra::IMqttLink {
   static void on_publish_qos1_success(void* context, int token);
   static void on_publish_qos1_failure(void* context, int token);
   void forget_inflight();
+  // 送った QoS 1 の電文のトークンを確認待ちの表に入れる（PUBACK が先に届いていれば delivered_ へ）
+  void track(int token);
 
   void push_event(infra::LinkEvent ev);
 

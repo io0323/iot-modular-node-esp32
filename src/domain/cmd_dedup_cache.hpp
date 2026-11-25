@@ -16,12 +16,12 @@ namespace node::domain {
 /// 64件を超えたら古いものから消す。rejected の結果も覚える。
 class CmdDedupCache {
  public:
-  static constexpr std::size_t kCapacity = 64;
-  static constexpr std::uint64_t kRetentionMs = 10U * 60U * 1000U;
-  static constexpr std::size_t kCmdIdLen = 26;
-  static constexpr std::size_t kPayloadMax = 256;
+  static constexpr std::size_t kCapacity = 64;                                   ///< 覚える件数
+  static constexpr std::uint64_t kRetentionMs = std::uint64_t{10} * 60U * 1000U;  ///< 覚えておく時間（10分）
+  static constexpr std::size_t kCmdIdLen = 26;                                    ///< cmd_id の長さ（ULID）
+  static constexpr std::size_t kPayloadMax = 256;                                 ///< ack の payload の最大長
 
-  using Payload = support::FixedString<kPayloadMax>;
+  using Payload = support::FixedString<kPayloadMax>;  ///< ack の payload
 
   /// @brief 覚えている ack の payload を探す。
   /// @param cmd_id cmd_id
@@ -37,13 +37,14 @@ class CmdDedupCache {
   [[nodiscard]] bool insert(std::string_view cmd_id, std::string_view payload, std::uint64_t now_ms);
 
   /// @brief 覚えている件数（期限切れを含む）。
+  /// @return 件数
   [[nodiscard]] std::size_t size() const { return count_; }
 
  private:
   struct Entry {
-    support::FixedString<kCmdIdLen> cmd_id{};
+    support::FixedString<kCmdIdLen> cmd_id;
     std::uint64_t stored_ms{0};
-    Payload payload{};
+    Payload payload;
   };
   std::array<Entry, kCapacity> entries_{};
   std::size_t next_{0};   ///< 次に書く位置（最も古いもの）

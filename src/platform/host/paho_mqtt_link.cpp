@@ -46,7 +46,9 @@ PahoMqttLink::~PahoMqttLink() {
 }
 
 Result<void> PahoMqttLink::connect(const infra::ConnectOptions& options) {
-  if (client_ == nullptr) return make_error(ErrorCode::Internal, "client not created");
+  if (client_ == nullptr) {
+    return make_error(ErrorCode::Internal, "client not created");
+  }
   will_topic_.assign(options.will.topic);
   will_payload_.assign(options.will.payload);
   username_.assign(options.username);
@@ -79,7 +81,9 @@ Result<void> PahoMqttLink::connect(const infra::ConnectOptions& options) {
 }
 
 void PahoMqttLink::disconnect(std::uint32_t timeout_ms) {
-  if (client_ == nullptr) return;
+  if (client_ == nullptr) {
+    return;
+  }
   NODE_PAHO_INIT_BEGIN
   MQTTAsync_disconnectOptions opts = MQTTAsync_disconnectOptions_initializer;
   NODE_PAHO_INIT_END
@@ -89,24 +93,38 @@ void PahoMqttLink::disconnect(std::uint32_t timeout_ms) {
   forget_inflight();
 }
 
+namespace {
+// コールバックの引数から送った電文のトークンを取る（Paho が NULL を渡したら 0）
+int token_of(const MQTTAsync_successData* r) { return r != nullptr ? r->token : 0; }
+int token_of(const MQTTAsync_failureData* r) { return r != nullptr ? r->token : 0; }
+}  // namespace
+
 Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_view payload, infra::Qos qos,
                                             bool retain) {
-  if (client_ == nullptr || !connected_.load()) return make_error(ErrorCode::NotConnected, "not connected");
+  if (client_ == nullptr || !connected_.load()) {
+    return make_error(ErrorCode::NotConnected, "not connected");
+  }
   const bool qos1 = qos == infra::Qos::AtLeastOnce;
-  if (qos1 && inflight() >= kMaxInflight) return make_error(ErrorCode::Busy, "inflight limit");
+  if (qos1 && inflight() >= kMaxInflight) {
+    return make_error(ErrorCode::Busy, "inflight limit");
+  }
   const std::string topic_s(topic);
 
   NODE_PAHO_INIT_BEGIN
   MQTTAsync_message msg = MQTTAsync_message_initializer;
   MQTTAsync_responseOptions ropts = MQTTAsync_responseOptions_initializer;
   NODE_PAHO_INIT_END
-  msg.payload = const_cast<char*>(payload.data());  // Paho は送る前に写しを取る（const を受けない API）
+  // Paho の API は const を受けないが、送る前に写しを取るので書き換えない（docs/quality.md の抑止の表）
+  msg.payload = const_cast<char*>(payload.data());  // NOLINT(cppcoreguidelines-pro-type-const-cast)
   msg.payloadlen = static_cast<int>(payload.size());
   msg.qos = static_cast<int>(qos);
   msg.retained = retain ? 1 : 0;
   if (qos1) {
-    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_success(ctx, r != nullptr ? r->token : 0); };
-    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_failure(ctx, r != nullptr ? r->token : 0); };
+    // 引数の型は Paho のコールバックの型どおり（const にできない。docs/quality.md の抑止の表）
+    // cppcheck-suppress constParameterPointer
+    ropts.onSuccess = [](void* ctx, MQTTAsync_successData* r) { on_publish_qos1_success(ctx, token_of(r)); };
+    // cppcheck-suppress constParameterPointer
+    ropts.onFailure = [](void* ctx, MQTTAsync_failureData* r) { on_publish_qos1_failure(ctx, token_of(r)); };
     ropts.context = this;
   }
   // Paho を呼ぶ間は mu_ を持たない（Paho のスレッドのコールバックも mu_ を取るので、持ったまま呼ぶとデッドロックしうる）
@@ -115,20 +133,26 @@ Result<std::uint32_t> PahoMqttLink::publish(std::string_view topic, std::string_
     return make_error(rc == MQTTASYNC_DISCONNECTED ? ErrorCode::NotConnected : ErrorCode::IoError,
                       "MQTTAsync_sendMessage failed");
   }
-  if (!qos1) return std::uint32_t{0};
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (early_acked_.erase(ropts.token) > 0) {
-      delivered_.push_back(static_cast<std::uint32_t>(ropts.token));  // 表に入れる前に PUBACK が届いていた
-    } else {
-      inflight_tokens_.insert(ropts.token);
-    }
+  if (!qos1) {
+    return std::uint32_t{0};
   }
+  track(ropts.token);
   return static_cast<std::uint32_t>(ropts.token);
 }
 
+void PahoMqttLink::track(int token) {
+  std::lock_guard<std::mutex> const lock(mu_);
+  if (early_acked_.erase(token) > 0) {
+    delivered_.push_back(static_cast<std::uint32_t>(token));  // 表に入れる前に PUBACK が届いていた
+  } else {
+    inflight_tokens_.insert(token);
+  }
+}
+
 Result<void> PahoMqttLink::subscribe(std::string_view topic, infra::Qos qos) {
-  if (client_ == nullptr || !connected_.load()) return make_error(ErrorCode::NotConnected, "not connected");
+  if (client_ == nullptr || !connected_.load()) {
+    return make_error(ErrorCode::NotConnected, "not connected");
+  }
   const std::string topic_s(topic);
   NODE_PAHO_INIT_BEGIN
   MQTTAsync_responseOptions ropts = MQTTAsync_responseOptions_initializer;
@@ -140,8 +164,10 @@ Result<void> PahoMqttLink::subscribe(std::string_view topic, infra::Qos qos) {
 }
 
 bool PahoMqttLink::poll_message(infra::InboundMessage& out) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (inbound_count_ == 0) return false;
+  std::lock_guard<std::mutex> const lock(mu_);
+  if (inbound_count_ == 0) {
+    return false;
+  }
   out = inbound_[inbound_head_];
   inbound_head_ = (inbound_head_ + 1) % kInboundCapacity;
   --inbound_count_;
@@ -149,27 +175,31 @@ bool PahoMqttLink::poll_message(infra::InboundMessage& out) {
 }
 
 bool PahoMqttLink::poll_delivery(std::uint32_t& token) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (delivered_.empty()) return false;
+  std::lock_guard<std::mutex> const lock(mu_);
+  if (delivered_.empty()) {
+    return false;
+  }
   token = delivered_.front();
   delivered_.pop_front();
   return true;
 }
 
 std::size_t PahoMqttLink::inflight() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<std::mutex> const lock(mu_);
   return inflight_tokens_.size();
 }
 
 void PahoMqttLink::forget_inflight() {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<std::mutex> const lock(mu_);
   inflight_tokens_.clear();  // 切断の時点で確認が取れていないもの（呼び出し側が送り直しを決める）
   early_acked_.clear();
 }
 
 infra::LinkEvent PahoMqttLink::poll_event() {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (events_count_ == 0) return infra::LinkEvent::None;
+  std::lock_guard<std::mutex> const lock(mu_);
+  if (events_count_ == 0) {
+    return infra::LinkEvent::None;
+  }
   const infra::LinkEvent ev = events_[events_head_];
   events_head_ = (events_head_ + 1) % kEventCapacity;
   --events_count_;
@@ -183,7 +213,7 @@ void PahoMqttLink::wait_for_activity(std::chrono::milliseconds timeout) {
 
 void PahoMqttLink::push_event(infra::LinkEvent ev) {
   {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard<std::mutex> const lock(mu_);
     if (events_count_ < kEventCapacity) {
       events_[(events_head_ + events_count_) % kEventCapacity] = ev;
       ++events_count_;
@@ -201,7 +231,7 @@ int PahoMqttLink::on_message(void* context, char* topic, int topic_len, void* me
   bool stored = false;
   bool oversized = false;
   {
-    std::lock_guard<std::mutex> lock(self->mu_);
+    std::lock_guard<std::mutex> const lock(self->mu_);
     if (self->inbound_count_ < kInboundCapacity) {
       infra::InboundMessage& slot = self->inbound_[(self->inbound_head_ + self->inbound_count_) % kInboundCapacity];
       if (slot.topic.assign(t) && slot.payload.assign(p)) {
@@ -246,10 +276,12 @@ void PahoMqttLink::on_connect_failure(void* context, void* /*response*/) {
 void PahoMqttLink::on_publish_qos1_success(void* context, int token) {
   auto* self = static_cast<PahoMqttLink*>(context);
   {
-    std::lock_guard<std::mutex> lock(self->mu_);
+    std::lock_guard<std::mutex> const lock(self->mu_);
     // 表にあるものを「確認が取れた」として知らせる。まだ表にない（publish の戻りより先に届いた）ものは覚えておく
     if (self->inflight_tokens_.erase(token) == 0) {
-      if (self->connected_.load()) self->early_acked_.insert(token);
+      if (self->connected_.load()) {
+        self->early_acked_.insert(token);
+      }
       return;
     }
     self->delivered_.push_back(static_cast<std::uint32_t>(token));
@@ -259,7 +291,7 @@ void PahoMqttLink::on_publish_qos1_success(void* context, int token) {
 
 void PahoMqttLink::on_publish_qos1_failure(void* context, int token) {
   auto* self = static_cast<PahoMqttLink*>(context);
-  std::lock_guard<std::mutex> lock(self->mu_);
+  std::lock_guard<std::mutex> const lock(self->mu_);
   (void)self->inflight_tokens_.erase(token);  // 確認は取れていない（送り直しは切断のときに決める）
 }
 

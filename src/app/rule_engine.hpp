@@ -22,16 +22,18 @@ namespace node::app {
 /// - 同じアクチュエーターに複数のルールが提案したら、大きい方の level を使う
 class RuleEngine {
  public:
-  static constexpr std::size_t kMaxRules = 16;
+  static constexpr std::size_t kMaxRules = 16;  ///< ルールの上限
 
   /// @brief アクチュエーターごとの提案。
   struct Proposal {
-    std::string_view actuator;
-    domain::Level level{0};
+    std::string_view actuator;  ///< アクチュエーターの ID
+    domain::Level level{0};     ///< 提案の出力
   };
+  /// @brief 1周分の提案。
   using Proposals = support::StaticVector<Proposal, kMaxRules>;
 
   /// @brief ルールを受け取る（kMaxRules 件まで）。
+  /// @param rules ルール（寿命はプログラム全体）
   explicit RuleEngine(std::span<const domain::Rule> rules);
 
   /// @brief ルールを評価し、提案を出す。
@@ -46,12 +48,17 @@ class RuleEngine {
  private:
   struct State {
     bool on{false};                                ///< ヒステリシスのルールが入っている
-    std::optional<std::uint64_t> pulse_start_ms{};  ///< 実行中のパルスの開始
-    std::optional<std::uint64_t> last_pulse_ms{};   ///< 最後にパルスを始めた時刻（クールダウン）
+    std::optional<std::uint64_t> pulse_start_ms;   ///< 実行中のパルスの開始
+    std::optional<std::uint64_t> last_pulse_ms;    ///< 最後にパルスを始めた時刻（クールダウン）
   };
 
-  std::optional<domain::Level> step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
+  static std::optional<domain::Level> step(const domain::Rule& r, State& st, std::optional<std::int32_t> value,
                                     std::uint64_t now_ms, bool active);
+  // ヒステリシスのルール（pulse_ms が 0）
+  static std::optional<domain::Level> step_hysteresis(const domain::Rule& r, State& st, std::int32_t value);
+  // パルスのルール（クールダウンつき）
+  static std::optional<domain::Level> step_pulse(const domain::Rule& r, State& st, std::int32_t value,
+                                                 std::uint64_t now_ms);
 
   std::span<const domain::Rule> rules_;
   std::array<State, kMaxRules> states_{};

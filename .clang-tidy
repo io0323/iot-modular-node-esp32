@@ -1,0 +1,38 @@
+# clang-tidy の設定（open-questions #80、docs/quality.md）。警告はすべてエラーにする。対象は src/ 全体。
+#
+# 外したもの（理由）：
+#   modernize-use-trailing-return-type        … 戻り値を後ろに書く形に揃えない（コードの決まりにない書き方で、読みにくくなる）
+#   readability-identifier-length              … i・p・w などの短い名前を、狭い範囲のループや書き手の変数に使う
+#   readability-magic-numbers                  … データシートのレジスタ値・ビット位置・仕様の上限を、出典のコメントつきでそのまま書く
+#   cppcoreguidelines-avoid-magic-numbers      … 同上（readability-magic-numbers の別名）
+#   misc-include-cleaner                       … 標準ヘッダの細かい出どころまで求め、層の公開ヘッダの使い方と合わない
+#   cppcoreguidelines-pro-bounds-pointer-arithmetic … hal・drivers の固定長バッファ（I2C の送受信・表示のバッファ）で多発する
+#   以下は P5 で io が決めた（open-questions #90〜#92）
+#   cppcoreguidelines-avoid-const-or-ref-data-members … 依存は参照のメンバーで受け取る設計（必ずあり、差し替えない）
+#   cppcoreguidelines-pro-bounds-constant-array-index … 固定容量のコンテナを、範囲を確かめた後の変数の添字で引く（pointer-arithmetic と同じ理由）
+#   bugprone-easily-swappable-parameters      … 直すには強い型で公開 API を変える必要がある（P5 は API を変えない。P8 で検討）
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -misc-include-cleaner,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^/src/src/'
+FormatStyle: none
+CheckOptions:
+  # インターフェース（virtual ~X() = default だけを持つ抽象クラス）にコピー・ムーブの宣言を求めない
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
