@@ -92,3 +92,121 @@ jobs:
             mosquitto.log
             sanitizer/
           if-no-files-found: warn
+
+  release:
+    name: host-release（-O2 の警告・CTest）
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ツール
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build
+
+      - name: ビルド（host-release）
+        run: |
+          cmake --preset host-release
+          cmake --build --preset host-release 2>&1 | tee build-release.log
+          if grep -E "warning:" build-release.log; then echo "::error::ビルドに警告がある"; exit 1; fi
+
+      - name: CTest
+        run: ctest --preset host-release --output-on-failure
+
+  tsan:
+    name: host-tsan（CTest・契約テスト・ブローカー再起動）
+    runs-on: ubuntu-24.04
+    env:
+      IOTSPEC_MQTT_URL: mqtt://localhost:1883
+      IOTSPEC_MQTT_PASSWORD: ci-${{ github.run_id }}
+      # 指摘はファイルに出し、最後の手順で1件でもあれば失敗にする。Paho の中だけの1件は抑止する（open-questions #89）
+      TSAN_OPTIONS: log_path=${{ github.workspace }}/sanitizer/tsan halt_on_error=0 suppressions=${{ github.workspace }}/tools/tsan.supp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ツール
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build
+          mkdir -p sanitizer
+          # Ubuntu 24.04 のカーネルの既定（mmap_rnd_bits=32）では TSan が起動できないので下げる
+          sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: ビルド（host-tsan）
+        run: |
+          cmake --preset host-tsan
+          cmake --build --preset host-tsan 2>&1 | tee build-tsan.log
+          if grep -E "warning:" build-tsan.log; then echo "::error::ビルドに警告がある"; exit 1; fi
+
+      - name: CTest
+        run: ctest --preset host-tsan --output-on-failure
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Mosquitto（ACL・パスワード付き）
+        run: |
+          external/iot-common-spec/deploy/mosquitto/gen_passwd.sh
+          docker compose -f external/iot-common-spec/docker-compose.yml up -d mosquitto
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/1883) 2>/dev/null; then echo "port 1883 open"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::Mosquitto のポート 1883 が開かない"; exit 1
+
+      - name: 契約テストキット（iot-common-spec v0.2.1）
+        run: |
+          uv tool install "iotspec @ git+https://github.com/io0323/iot-common-spec@v0.2.1"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: 契約テスト（--role mcu-cpp-01、既定の模擬機器、TSan）
+        run: iotspec-contract --role mcu-cpp-01 --target-cmd "./build/host-tsan/mcu_cpp_01 --log contract-tsan-log.jsonl" --junit contract-tsan.xml
+
+      - name: ブローカーの停止・再開（TSan）
+        if: always()
+        shell: bash  # -o pipefail（tee で失敗を隠さない）
+        run: uv run tests/system/broker_restart.py --binary ./build/host-tsan/mcu_cpp_01 --log broker-restart-tsan-log.jsonl 2>&1 | tee broker-restart-tsan.txt
+
+      - name: TSan の指摘がないこと
+        if: always()
+        run: |
+          if ls sanitizer/* >/dev/null 2>&1; then cat sanitizer/*; echo "::error::TSan の指摘がある"; exit 1; fi
+          echo "TSan の指摘なし"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tsan
+          path: |
+            contract-tsan.xml
+            contract-tsan-log.jsonl
+            broker-restart-tsan.txt
+            broker-restart-tsan-log.jsonl
+            sanitizer/
+          if-no-files-found: warn
+
+  quality:
+    name: 品質（coverage・clang-tidy・cppcheck・lizard・Doxygen）
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: tools/quality.sh all（tools/docker/quality.Dockerfile のイメージの中で動かす）
+        shell: bash
+        run: tools/quality.sh all 2>&1 | tee quality.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality
+          path: |
+            quality.txt
+            build/quality/
+          if-no-files-found: warn
