@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "app/ui_service.hpp"
+#include "drivers/ui_io.hpp"
 #include "drivers/sim/sim_sensor.hpp"
 
 namespace node::app {
@@ -62,7 +63,8 @@ class UiServiceTest : public ::testing::Test {
   ScriptedButton mode_btn;
   ScriptedButton action_btn;
   RecordingDisplay display;
-  UiService ui{UiService::Devices{&mode_btn, &action_btn, &display}, modes, manual, arbiter, store};
+  drivers::UiIo io{domain::UiDevices{&mode_btn, &action_btn, &display}};
+  UiService ui{true, modes, manual, arbiter, store};
   std::uint64_t now{0};
   ControlArbiter::InterlockChanges ch{};
 
@@ -75,7 +77,7 @@ class UiServiceTest : public ::testing::Test {
   }
   UiService::Actions step(bool connected = true) {
     now += 20;
-    return ui.tick(now, connected);
+    return ui.tick(now, connected, io);
   }
   void enter_manual() {
     (void)modes.request(Mode::Manual, now);
@@ -152,7 +154,7 @@ TEST_F(UiServiceTest, FaultShowsDashes) {
 }
 
 TEST_F(UiServiceTest, RefreshesEverySecondAndTurnsOffInPowerSave) {
-  ASSERT_TRUE(ui.init());
+  ASSERT_TRUE(io.init());
   (void)step();
   EXPECT_EQ(display.shows, 1);
   for (int i = 0; i < 48; ++i) (void)step();  // 960ms

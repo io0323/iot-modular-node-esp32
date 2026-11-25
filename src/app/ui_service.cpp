@@ -77,32 +77,23 @@ constexpr std::string_view mode_label(domain::Mode m) {
 
 }  // namespace
 
-support::Result<void> UiService::init() const {
-  if (dev_.mode_button != nullptr) {
-    if (auto r = dev_.mode_button->init(); !r) {
-      return r;
-    }
-  }
-  if (dev_.action_button != nullptr) {
-    if (auto r = dev_.action_button->init(); !r) {
-      return r;
-    }
-  }
-  if (dev_.display != nullptr) {
-    if (auto r = dev_.display->init(); !r) {
-      return r;
-    }
-  }
-  return support::ok();
-}
-
-void UiService::handle_action(domain::ButtonEvent ev, std::uint64_t now_ms) {
-  // 手動モード以外の ACTION は無視する（ManualControl が NotManualMode を返す）
-  if (ev == domain::ButtonEvent::Short) {
-    (void)manual_.select_next();
-  }
-  if (ev == domain::ButtonEvent::Long) {
-    (void)manual_.toggle_selected(now_ms);
+void UiService::handle(const domain::UiInput& in, std::uint64_t now_ms, Actions& actions) {
+  switch (in.kind) {
+    case domain::UiInputKind::ModeButton:
+      if (in.event == domain::ButtonEvent::Short) {
+        actions.mode_pressed = true;
+      }
+      return;
+    case domain::UiInputKind::ActionButton:
+      // 手動モード以外の ACTION は無視する（ManualControl が NotManualMode を返す）
+      if (in.event == domain::ButtonEvent::Short) {
+        (void)manual_.select_next();
+      }
+      if (in.event == domain::ButtonEvent::Long) {
+        (void)manual_.toggle_selected(now_ms);
+      }
+      return;
+    case domain::UiInputKind::DisplayError: ++display_errors_; return;
   }
 }
 
@@ -135,48 +126,33 @@ std::array<Line, domain::IDisplay::kRows> UiService::compose(std::uint64_t now_m
   return lines;
 }
 
-void UiService::refresh_display(std::uint64_t now_ms, bool connected) {
-  if (dev_.display == nullptr) {
-    return;
-  }
+std::optional<domain::DisplayFrame> UiService::frame(std::uint64_t now_ms, bool connected) {
+  // 省電力モードに入ったらすぐに消す。表示の中身は1秒ごと
   const bool want_on = modes_.mode() != domain::Mode::PowerSave;
-  if (want_on != display_on_) {
-    if (!dev_.display->set_power(want_on)) {
-      ++display_errors_;  // 省電力モードでは表示を消す
-    }
-    display_on_ = want_on;
+  const bool due = now_ms >= next_display_ms_;
+  if (due) {
+    next_display_ms_ = now_ms + kDisplayPeriodMs;
   }
-  if (!display_on_) {
-    return;
+  if (!has_display_ || (!due && want_on == display_on_)) {
+    return std::nullopt;
   }
-  const auto lines = compose(now_ms, connected);
-  std::array<std::string_view, domain::IDisplay::kRows> views{};
-  for (std::size_t i = 0; i < lines.size(); ++i) {
-    views[i] = lines[i].view();
+  display_on_ = want_on;
+  domain::DisplayFrame f{};
+  f.power_on = want_on;
+  if (want_on) {
+    f.has_lines = true;
+    f.lines = compose(now_ms, connected);
   }
-  if (!dev_.display->show(views)) {
-    ++display_errors_;
-  }
+  return f;
 }
 
-UiService::Actions UiService::tick(std::uint64_t now_ms, bool connected) {
+UiService::Actions UiService::tick(std::uint64_t now_ms, bool connected, domain::IUiIo& io) {
   Actions a{};
-  if (now_ms >= next_button_ms_) {
-    next_button_ms_ = now_ms + kButtonPeriodMs;
-    if (dev_.mode_button != nullptr && dev_.mode_button->poll(now_ms) == domain::ButtonEvent::Short) {
-      a.mode_pressed = true;
-    }
-    if (dev_.action_button != nullptr) {
-      handle_action(dev_.action_button->poll(now_ms), now_ms);
-    }
+  for (domain::UiInput in{}; io.poll_input(now_ms, in);) {
+    handle(in, now_ms, a);
   }
-  // 省電力モードに入ったらすぐに消す。表示の中身は1秒ごと
-  const bool power_change = (modes_.mode() != domain::Mode::PowerSave) != display_on_;
-  if (now_ms >= next_display_ms_ || power_change) {
-    if (now_ms >= next_display_ms_) {
-      next_display_ms_ = now_ms + kDisplayPeriodMs;
-    }
-    refresh_display(now_ms, connected);
+  if (const auto f = frame(now_ms, connected)) {
+    io.show(*f);
   }
   return a;
 }

@@ -18,6 +18,7 @@
 #include "app/telemetry_service.hpp"
 #include "app/ui_service.hpp"
 #include "domain/device.hpp"
+#include "domain/io.hpp"
 #include "domain/reading_store.hpp"
 #include "infra/clock.hpp"
 #include "infra/envelope.hpp"
@@ -54,13 +55,16 @@ class Node {
   /// @brief サービスを組み立てる（機器の初期化と接続は start と tick で行う）。
   /// @param config 設定
   /// @param registry 機器の一覧
+  /// @param sensor_io センサーのハードに触る部分（ホスト版は drivers::SensorIo、ターゲット版は sense のタスクへのキュー）
+  /// @param ui_io UI のハードに触る部分（ホスト版は drivers::UiIo、ターゲット版は ui のタスクへのキュー）
   /// @param link MQTT の接続
   /// @param network ネットワーク（Wi-Fi）
   /// @param sync 時刻の同期
   /// @param clock 単調時計
   /// @param rng 乱数（boot_id・msg_id）
   /// @param log ログ
-  Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link, infra::INetwork& network,
+  Node(const NodeConfig& config, domain::DeviceRegistry registry, domain::ISensorIo& sensor_io, domain::IUiIo& ui_io,
+       infra::IMqttLink& link, infra::INetwork& network,
        const infra::ITimeSync& sync, const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log);
 
   /// @brief 機器を初期化し、BOOT をためる。
@@ -135,6 +139,8 @@ class Node {
 
   NodeConfig config_;
   domain::DeviceRegistry registry_;
+  domain::ISensorIo& sensor_io_;
+  domain::IUiIo& ui_io_;
   infra::IMqttLink& link_;
   const infra::IClock& clock_;
   infra::ILogSink& log_;

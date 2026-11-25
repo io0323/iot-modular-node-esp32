@@ -4,10 +4,13 @@ namespace node::app {
 
 using infra::Kind;
 
-Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMqttLink& link, infra::INetwork& network,
+Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, domain::ISensorIo& sensor_io, domain::IUiIo& ui_io,
+           infra::IMqttLink& link, infra::INetwork& network,
            const infra::ITimeSync& sync, const infra::IClock& clock, infra::IRandom& rng, infra::ILogSink& log)
     : config_(config),
       registry_(registry),
+      sensor_io_(sensor_io),
+      ui_io_(ui_io),
       link_(link),
       clock_(clock),
       log_(log),
@@ -21,7 +24,7 @@ Node::Node(const NodeConfig& config, domain::DeviceRegistry registry, infra::IMq
       commands_(arbiter_, modes_),
       state_(registry.sensors(), arbiter_, config.fw_version),
       telemetry_(arbiter_),
-      ui_(registry.ui(), modes_, manual_, arbiter_, store_),
+      ui_(registry.ui().display != nullptr, modes_, manual_, arbiter_, store_),
       connection_(network, sync, link) {
   apply_mode_state();
 }
@@ -40,7 +43,7 @@ support::Result<void> Node::start() {
       return r;
     }
   }
-  if (auto r = ui_.init(); !r) {
+  if (auto r = ui_io_.init(); !r) {
     return r;
   }
   const std::uint64_t now = clock_.monotonic_ms();
@@ -73,13 +76,13 @@ void Node::tick() {
   handle_connection(now);
 
   // 計測を先に行う（起動直後の最初の調停の前に全センサーを読む。#36）
-  poller_.tick(now, poll_);
+  poller_.tick(now, sensor_io_, poll_);
   post_sensor_events(poll_);
 
   if (const auto change = modes_.tick(now)) {
     on_mode_change(*change);
   }
-  if (ui_.tick(now, connection_.mqtt_connected()).mode_pressed) {
+  if (ui_.tick(now, connection_.mqtt_connected(), ui_io_).mode_pressed) {
     press_button();
   }
   handle_inbound(now);

@@ -23,6 +23,8 @@
 #include "app/node.hpp"
 #include "config/devices.hpp"
 #include "config/fakehw.hpp"
+#include "drivers/sensor_io.hpp"
+#include "drivers/ui_io.hpp"
 #include "platform/host/debug_inputs.hpp"
 #include "platform/host/host_clock.hpp"
 #include "platform/host/host_hal.hpp"
@@ -265,7 +267,9 @@ int main(int argc, char** argv) {
   // Node は大きい（固定容量のバッファを持つ）のでスタックに置かない
   static node::platform::HostTimeSync const time_sync(args.sntp_delay_ms);
   static node::platform::HostNetwork network(args.net_down);
-  static node::app::Node app(config, registry, link, network, time_sync, clock, rng, *log);
+  static node::drivers::SensorIo sensor_io(registry.sensors());
+  static node::drivers::UiIo ui_io(registry.ui());
+  static node::app::Node app(config, registry, sensor_io, ui_io, link, network, time_sync, clock, rng, *log);
   if (auto r = app.start(); !r) {
     print_err("start failed: " + std::string(r.error().what) + "\n");
     return 1;

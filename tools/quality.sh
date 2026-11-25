@@ -93,6 +93,11 @@ run_cppcheck() {
     --enable=warning,style,performance,portability --std=c++20 --inline-suppr --error-exitcode=1 \
     --suppressions-list=tools/cppcheck.supp -j "$(nproc)" --quiet \
     --template='{file}:{line}: {severity}: {message} [{id}]' 2>"$d/cppcheck.txt" || rc=$?
+  # ターゲット版（src/platform/esp32）は host の compile_commands.json にないので、ファイルを渡して読む。
+  # ESP-IDF のヘッダはこのイメージにないので、見つからない include だけを外す（docs/quality.md「cppcheck」）
+  cppcheck --enable=warning,style,performance,portability --std=c++20 --inline-suppr --error-exitcode=1 \
+    -I src --suppress=missingInclude --suppress=missingIncludeSystem --quiet \
+    --template='{file}:{line}: {severity}: {message} [{id}]' src/platform/esp32/*.cpp 2>>"$d/cppcheck.txt" || rc=$?
   echo "cppcheck の指摘：$(grep -c ': ' "$d/cppcheck.txt" || true) 件"
   [[ $rc -eq 0 ]] || { head -50 "$d/cppcheck.txt"; return 1; }
 }

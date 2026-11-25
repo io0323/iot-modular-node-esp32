@@ -51,7 +51,9 @@ node_product_target(node_app)
 add_library(node_drivers STATIC
   drivers/bme280.cpp
   drivers/bh1750.cpp
-  drivers/ssd1306.cpp)
+  drivers/ssd1306.cpp
+  drivers/sensor_io.cpp
+  drivers/ui_io.cpp)
 target_link_libraries(node_drivers PUBLIC node_domain node_hal)
 node_product_target(node_drivers)
 
@@ -70,6 +72,7 @@ node_product_target(node_drivers_fake)
 # config：構成表
 add_library(node_config STATIC
   config/devices.cpp
+  config/hw.cpp
   config/fakehw.cpp)
 target_link_libraries(node_config PUBLIC node_domain node_drivers_sim node_drivers node_drivers_fake)
 node_product_target(node_config)
