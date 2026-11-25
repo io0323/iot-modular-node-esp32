@@ -29,3 +29,5 @@ GENERATE_LATEX         = NO
 HAVE_DOT               = NO
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = NO
+# 構成表（config/hw_table.hpp・fakehw_table.hpp）をクラスの中で読むため（#145）
+INCLUDE_PATH           = src

@@ -196,7 +196,7 @@ src/
   drivers/        機器のドライバ（データシートどおり）
   drivers/fake/   hal と機器のフェイク（テストと --devices fakehw）
   drivers/sim/    ホスト用の模擬センサー・模擬アクチュエーター
-  config/         構成表（devices.cpp：模擬機器、fakehw.cpp：ドライバとフェイク）
+  config/         構成表（devices.cpp：模擬機器、hw_table.hpp：実機用の1行が1台の表（HwRig が展開）、fakehw_table.hpp：フェイクの機器の表）
   platform/host/  Paho・時計・時刻の同期・ネットワーク（模擬）・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
   platform/esp32/ ESP-IDF の hal・infra の実装、タスク、app_main（ESP-IDF・FreeRTOS を使えるのはここだけ）
 firmware/         ESP-IDF のプロジェクト（src/ をコンポーネント node_core・node_platform_esp32 として読む）

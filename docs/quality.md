@@ -95,6 +95,8 @@ docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
 | 16 | cppcheck | `src/platform/esp32/esp32_mqtt.cpp`（`EspMqttComm::on_event`） | `constParameterCallback` | 引数の型は esp-mqtt のイベントハンドラー（`esp_event_handler_t`）の型どおりで、const にできない（P6） |
 | 15 | TSan | `tools/tsan.supp` | `race:MQTTAsync_tostop` | Paho v1.3.16 の中だけの race（CI の GCC の TSan で出る）。再接続のとき `MQTTAsync_connect` がミューテックスの中でグローバル変数 `MQTTAsync_tostop` を書き、送信・受信スレッドがミューテックスなしで読む。変数名で絞り、この変数の race だけを外す（#93） |
 
+設定の側の抑止が 1 つあります（P8）。`.clang-tidy` の `cppcoreguidelines-macro-usage.AllowedRegexp` で、構成表の X マクロ（`NODE_SENSOR`・`NODE_ACTUATOR`・`NODE_FAKE_I2C`・`NODE_FAKE_I2C_ARGS`・`NODE_CONFIG_UNPAREN`）だけを許しています。構成表を「1行が1台」の表にし、機器を足すときに既存のクラスを変えないためです（NFR-01、#145）。マクロは `src/config` の中だけで使います。
+
 ほかに、P1 からあるコンパイラの警告の抑止が 1 つあります：`src/platform/host/paho_mqtt_link.cpp` の `NODE_PAHO_INIT_BEGIN`／`END`（GCC の `-Wmissing-field-initializers` を、Paho の初期化マクロ `MQTTAsync_*_initializer` の間だけ外す。Paho のマクロが後ろの項目を省くため）。
 
 ## エミュレーター（P7）

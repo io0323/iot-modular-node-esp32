@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <initializer_list>
 
 #include "config/devices.hpp"
 #include "domain/device.hpp"
@@ -16,6 +17,9 @@
 #include "drivers/soil_moisture.hpp"
 #include "drivers/ssd1306.hpp"
 #include "hal/hal.hpp"
+
+/// 構成表の行の、括弧でくくった引数の並びを外す（config/hw_table.hpp・fakehw_table.hpp）
+#define NODE_CONFIG_UNPAREN(...) __VA_ARGS__
 
 namespace node::config {
 
@@ -48,7 +52,8 @@ struct HwInterfaces {
   hal::ITimer& timer;       ///< ドライバの待ち時間
 };
 
-/// @brief 構成表の実機用の行（センサー3台・アクチュエーター4台・インターロック・ボタン2つ・OLED）。
+/// @brief 構成表の実機用の行（センサー・アクチュエーターは config/hw_table.hpp の1行が1台。ほかにインターロック・
+/// ボタン2つ・OLED）。
 class HwRig {
  public:
   /// @brief ドライバを hal につなぐ（機器にはまだ触らない。初期化は Node::start）。
@@ -68,26 +73,23 @@ class HwRig {
   }
 
  private:
-  static constexpr std::array<domain::ChannelSpec, 3> kBmeChannels{{
-      {"temp_air", domain::Unit::DegC, 2000},
-      {"humidity", domain::Unit::PctRh, 2000},
-      {"pressure", domain::Unit::HPa, 2000},
-  }};
-  static constexpr std::array<domain::ChannelSpec, 1> kLuxChannel{{{"lux", domain::Unit::Lux, 1000}}};
-  static constexpr std::array<domain::ChannelSpec, 1> kSoilChannel{{{"soil", domain::Unit::Pct, 10000}}};
-  static constexpr domain::ActuatorSpec kFanMain{"fan_main", 0, 1000, {}};
-  static constexpr domain::ActuatorSpec kLedGrow{"led_grow", 0, 1000, {}};
-  static constexpr domain::ActuatorSpec kPump{"pump", 0, 1000, std::uint16_t{kPumpMaxOnS}};
-  static constexpr domain::ActuatorSpec kBuzzer{"buzzer", 0, 1000, {}};
+  /// I2C0 の宛先（構成表の行から使う）
+  static hal::I2cDevice i2c(const HwInterfaces& hw, std::uint8_t address) {
+    return hal::I2cDevice{&hw.i2c, &hw.i2c_mutex, address};
+  }
 
-  // ---- 構成表（1行が1台）
-  drivers::Bme280 bme280_;
-  drivers::Bh1750 bh1750_;
-  drivers::SoilMoisture soil_;
-  drivers::PwmActuator fan_main_;
-  drivers::PwmActuator led_grow_;
-  drivers::RelayActuator pump_;
-  drivers::PwmActuator buzzer_;
+  // ---- 構成表（config/hw_table.hpp。1行が1台）：チャネル・仕様（ドライバが参照する）とドライバ
+#define NODE_SENSOR(type, name, args, period_ms, channels)                                                \
+  static constexpr auto name##_channels_ = std::to_array<domain::ChannelSpec>({NODE_CONFIG_UNPAREN channels}); \
+  type name##_;
+#define NODE_ACTUATOR(type, name, args, spec, interlocks) \
+  static constexpr domain::ActuatorSpec name##_spec_{NODE_CONFIG_UNPAREN spec}; \
+  type name##_;
+#include "config/hw_table.hpp"
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
+
+  // ---- 本体の UI
   drivers::Ssd1306 display_;
   drivers::Button mode_button_;
   drivers::Button action_button_;
@@ -100,8 +102,23 @@ class HwRig {
   std::array<domain::IInterlock*, 2> fan_interlocks_{&fan_temp_high_, &fan_on_temp_fault_};
   std::array<domain::IInterlock*, 2> pump_interlocks_{&pump_max_on_, &pump_off_on_soil_fault_};
 
-  std::array<domain::ISensor*, 3> sensors_;
-  std::array<domain::ActuatorBinding, 4> actuators_;
+  // ---- 一覧（構成表の行の数と順）
+#define NODE_SENSOR(type, name, args, period_ms, channels) 1,
+#define NODE_ACTUATOR(type, name, args, spec, interlocks)
+  static constexpr std::size_t kSensorCount = std::initializer_list<int>{
+#include "config/hw_table.hpp"
+  }.size();
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
+#define NODE_SENSOR(type, name, args, period_ms, channels)
+#define NODE_ACTUATOR(type, name, args, spec, interlocks) 1,
+  static constexpr std::size_t kActuatorCount = std::initializer_list<int>{
+#include "config/hw_table.hpp"
+  }.size();
+#undef NODE_SENSOR
+#undef NODE_ACTUATOR
+  std::array<domain::ISensor*, kSensorCount> sensors_;
+  std::array<domain::ActuatorBinding, kActuatorCount> actuators_;
 };
 
 }  // namespace node::config

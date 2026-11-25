@@ -34,5 +34,7 @@ WarningsAsErrors: '*'
 HeaderFilterRegex: '^/src/src/'
 FormatStyle: none
 CheckOptions:
+  # 構成表の X マクロ（config/hw_table.hpp・fakehw_table.hpp。1行が1台。open-questions #145）だけを許す
+  cppcoreguidelines-macro-usage.AllowedRegexp: '^NODE_(SENSOR|ACTUATOR|FAKE_I2C|FAKE_I2C_ARGS|CONFIG_UNPAREN)$'
   # インターフェース（virtual ~X() = default だけを持つ抽象クラス）にコピー・ムーブの宣言を求めない
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true

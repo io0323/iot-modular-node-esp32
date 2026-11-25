@@ -41,15 +41,13 @@ class FakeHwRig {
   /// @brief I2C バスのフェイク。
   /// @return バス
   drivers::fake::FakeI2cBus& bus() { return bus_; }
-  /// @brief BME280 のフェイク。
-  /// @return 機器
-  drivers::fake::FakeBme280Device& bme280_device() { return bme280_device_; }
-  /// @brief BH1750 のフェイク。
-  /// @return 機器
-  drivers::fake::FakeBh1750Device& bh1750_device() { return bh1750_device_; }
-  /// @brief SSD1306 のフェイク。
-  /// @return 機器
-  drivers::fake::FakeSsd1306Device& ssd1306_device() { return ssd1306_device_; }
+  // ---- I2C の機器のフェイク（構成表 config/fakehw_table.hpp の1行が1台）。名前() で取り出す
+#define NODE_FAKE_I2C(type, name, address) \
+  type& name() { return name##_; }
+#define NODE_FAKE_I2C_ARGS(type, name, args, address) NODE_FAKE_I2C(type, name, address)
+#include "config/fakehw_table.hpp"
+#undef NODE_FAKE_I2C
+#undef NODE_FAKE_I2C_ARGS
   /// @brief ADC のフェイク。
   /// @return ADC
   drivers::fake::FakeAdc& adc() { return adc_; }
@@ -65,9 +63,11 @@ class FakeHwRig {
 
  private:
   drivers::fake::FakeI2cBus bus_;
-  drivers::fake::FakeBme280Device bme280_device_;
-  drivers::fake::FakeBh1750Device bh1750_device_;
-  drivers::fake::FakeSsd1306Device ssd1306_device_;
+#define NODE_FAKE_I2C(type, name, address) type name##_;
+#define NODE_FAKE_I2C_ARGS(type, name, args, address) type name##_;
+#include "config/fakehw_table.hpp"
+#undef NODE_FAKE_I2C
+#undef NODE_FAKE_I2C_ARGS
   drivers::fake::FakeAdc adc_;
   drivers::fake::FakePwm pwm_;
   drivers::fake::FakeGpio gpio_;
