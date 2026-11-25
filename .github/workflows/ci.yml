@@ -210,3 +210,39 @@ jobs:
             quality.txt
             build/quality/
           if-no-files-found: warn
+
+  firmware:
+    name: ターゲット版（ESP-IDF v5.5.6、ESP32-S3）
+    runs-on: ubuntu-24.04
+    # Mac と同じ Espressif の公式イメージでビルドする（open-questions #94・#109）
+    container: espressif/idf:v5.5.6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ビルド（警告ゼロは自分のコンポーネントの -Werror と、src・firmware の警告の grep で確かめる）
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" >/dev/null
+          cd firmware
+          idf.py -B ../build/firmware build 2>&1 | tee ../firmware-build.log
+          if grep -E "(/src/|/firmware/).*warning:" ../firmware-build.log; then echo "::error::自分のコンポーネントに警告がある"; exit 1; fi
+
+      - name: イメージの大きさ（idf.py size）
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" >/dev/null
+          cd firmware
+          idf.py -B ../build/firmware size 2>&1 | tee ../firmware-size.txt
+          idf.py -B ../build/firmware size-components 2>&1 > ../firmware-size-components.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: firmware
+          path: |
+            firmware-build.log
+            firmware-size.txt
+            firmware-size-components.txt
+            build/firmware/mcu_cpp_01.bin
+            build/firmware/mcu_cpp_01.map
+          if-no-files-found: warn

@@ -87,6 +87,9 @@ class EspMqttComm {
   void handle_command(const std::uint8_t* item, std::size_t len);
   void do_connect(const std::uint8_t* item, std::size_t len);
   void do_publish(const std::uint8_t* item, std::size_t len);
+  bool keep_strings(const std::array<std::string_view, 5>& s);
+  [[nodiscard]] esp_mqtt_client_config_t config_of(const void* header) const;
+  bool apply_config(const esp_mqtt_client_config_t& cfg);
   void stop_client();
   void forward_events();
   void send_link_event(infra::LinkEvent ev) const;

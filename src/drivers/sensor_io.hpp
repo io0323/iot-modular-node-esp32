@@ -30,7 +30,7 @@ class SensorIo final : public domain::ISensorIo {
   bool poll_report(domain::SensorReport& out) override;
 
  private:
-  bool read_once(domain::ISensor& s, domain::SensorReport& out);
+  static bool read_once(domain::ISensor& s, domain::SensorReport& out);
 
   std::span<domain::ISensor* const> sensors_;
   support::StaticVector<domain::SensorReport, kMaxPending> pending_{};

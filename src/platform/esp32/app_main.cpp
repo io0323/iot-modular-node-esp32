@@ -47,12 +47,8 @@ void init_nvs() {
   }
 }
 
-}  // namespace
-
-void run() {
-  init_nvs();
-
-  // ---- 1. 機器：hal を作り、各アクチュエーターを初期化して 0 を出す（#99。タスクを起こす前）
+/// 1. 機器：hal を作り、各アクチュエーターを初期化して 0 を出す（#99。タスクを起こす前）
+domain::DeviceRegistry init_devices() {
   static EspI2cBus i2c(config::esp32::kI2cSdaGpio, config::esp32::kI2cSclGpio);
   static EspMutex i2c_mutex;
   static EspAdc adc(config::esp32::kAdcPins);
@@ -72,8 +68,11 @@ void run() {
       ESP_LOGE(kTag, "actuator init failed: %.*s", static_cast<int>(b.actuator->id().size()), b.actuator->id().data());
     }
   }
+  return registry;
+}
 
-  // ---- 2. Wi-Fi を起動する（RF が動き、esp_random が真の乱数になる。#101）と SNTP
+/// 2. Wi-Fi を起動する（RF が動き、esp_random が真の乱数になる。#101）と SNTP（#103）
+EspNetwork& start_network() {
   (void)esp_netif_init();
   (void)esp_event_loop_create_default();
   static EspNetwork network;
@@ -81,11 +80,30 @@ void run() {
     ESP_LOGE(kTag, "wifi start failed");
   }
   static const support::FixedString<128> broker_host = host_of(CONFIG_NODE_MQTT_URL);
-  static const char* const sntp1 = std::string_view(CONFIG_NODE_SNTP_SERVER1).empty() ? broker_host.c_str()
-                                                                                       : CONFIG_NODE_SNTP_SERVER1;
+  const char* const sntp1 =
+      std::string_view(CONFIG_NODE_SNTP_SERVER1).empty() ? broker_host.c_str() : CONFIG_NODE_SNTP_SERVER1;
   if (!EspTimeSync::start(sntp1, CONFIG_NODE_SNTP_SERVER2)) {
     ESP_LOGE(kTag, "sntp start failed");
   }
+  return network;
+}
+
+/// Node の設定（Kconfig とリセット要因。#100・#102）
+app::NodeConfig node_config() {
+  app::NodeConfig config{};
+  config.site = std::string_view(CONFIG_NODE_SITE).empty() ? infra::Topics::kDefaultSite : CONFIG_NODE_SITE;
+  config.password = CONFIG_NODE_MQTT_PASSWORD;
+  config.reset_reason = infra::reset_reason_of(reset_cause());
+  config.platform_reason = reset_reason_name();
+  return config;
+}
+
+}  // namespace
+
+void run() {
+  init_nvs();
+  const domain::DeviceRegistry registry = init_devices();
+  EspNetwork& network = start_network();
 
   // ---- 3. Node を作る（boot_id はここで esp_random から決まる。#101）
   static EspClock clock;
@@ -97,12 +115,7 @@ void run() {
   static const IoQueues io_queues = create_io_queues();
   static QueueSensorIo sensor_proxy(io_queues);
   static QueueUiIo ui_proxy(io_queues);
-  app::NodeConfig config{};
-  config.site = std::string_view(CONFIG_NODE_SITE).empty() ? infra::Topics::kDefaultSite : CONFIG_NODE_SITE;
-  config.password = CONFIG_NODE_MQTT_PASSWORD;
-  config.reset_reason = infra::reset_reason_of(reset_cause());
-  config.platform_reason = reset_reason_name();
-  static app::Node node(config, registry, sensor_proxy, ui_proxy, link, network, time_sync, clock, rng, log);
+  static app::Node node(node_config(), registry, sensor_proxy, ui_proxy, link, network, time_sync, clock, rng, log);
 
   // ---- 4. UI の機器を初期化し、Node を起動する（センサーの初期化と BOOT。タスクを起こす前に1回だけ）
   static drivers::UiIo ui(registry.ui());

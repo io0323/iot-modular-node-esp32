@@ -2,6 +2,8 @@
 // 機器に依らない列挙をここに置き、ESP-IDF の esp_reset_reason() の値からの変換は platform/esp32 が受け持つ。
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -26,20 +28,22 @@ enum class PlatformResetCause : std::uint8_t {
 /// @param cause リセット要因
 /// @return power_on・pin・software・watchdog・brownout・low_power・unknown のどれか
 constexpr std::string_view reset_reason_of(PlatformResetCause cause) {
-  switch (cause) {
-    case PlatformResetCause::PowerOn: return "power_on";
-    case PlatformResetCause::External: return "pin";
-    case PlatformResetCause::Software: return "software";
-    case PlatformResetCause::Panic: return "software";  // 作品01と揃えるため共通仕様の変更案で確かめる（基本設計書）
-    case PlatformResetCause::InterruptWatchdog:
-    case PlatformResetCause::TaskWatchdog:
-    case PlatformResetCause::OtherWatchdog: return "watchdog";
-    case PlatformResetCause::Brownout:
-    case PlatformResetCause::PowerGlitch: return "brownout";
-    case PlatformResetCause::DeepSleep: return "low_power";
-    case PlatformResetCause::Unknown: return "unknown";
-  }
-  return "unknown";
+  // PlatformResetCause の並びの順（基本設計書 第6章の表）
+  constexpr std::array<std::string_view, 11> kReasons{
+      "power_on",  // PowerOn
+      "pin",       // External
+      "software",  // Software
+      "software",  // Panic（作品01と揃えるため共通仕様の変更案で確かめる。基本設計書）
+      "watchdog",  // InterruptWatchdog
+      "watchdog",  // TaskWatchdog
+      "watchdog",  // OtherWatchdog
+      "brownout",  // Brownout
+      "brownout",  // PowerGlitch
+      "low_power", // DeepSleep
+      "unknown",   // Unknown
+  };
+  const auto i = static_cast<std::size_t>(cause);
+  return i < kReasons.size() ? kReasons[i] : std::string_view{"unknown"};
 }
 
 }  // namespace node::infra

@@ -3,6 +3,7 @@
 #include <sys/time.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 #include "esp_event.h"
@@ -147,43 +148,45 @@ void EspLogSink::write(std::string_view event, std::string_view fields_json) {
 
 // ---------------- リセット要因
 
-infra::PlatformResetCause reset_cause() {
-  using C = infra::PlatformResetCause;
-  switch (esp_reset_reason()) {
-    case ESP_RST_POWERON: return C::PowerOn;
-    case ESP_RST_EXT: return C::External;
-    case ESP_RST_SW: return C::Software;
-    case ESP_RST_PANIC: return C::Panic;
-    case ESP_RST_INT_WDT: return C::InterruptWatchdog;
-    case ESP_RST_TASK_WDT: return C::TaskWatchdog;
-    case ESP_RST_WDT: return C::OtherWatchdog;
-    case ESP_RST_BROWNOUT: return C::Brownout;
-    case ESP_RST_PWR_GLITCH: return C::PowerGlitch;
-    case ESP_RST_DEEPSLEEP: return C::DeepSleep;
-    default: return C::Unknown;  // ESP_RST_UNKNOWN・SDIO・USB・JTAG・EFUSE・CPU_LOCKUP など
-  }
+namespace {
+
+/// esp_reset_reason_t（esp_system.h）と、機器に依らない列挙・列挙の名前
+struct ResetRow {
+  esp_reset_reason_t esp;
+  infra::PlatformResetCause cause;
+  std::string_view name;
+};
+
+using C = infra::PlatformResetCause;
+constexpr std::array<ResetRow, 16> kResetRows{{
+    {ESP_RST_UNKNOWN, C::Unknown, "ESP_RST_UNKNOWN"},
+    {ESP_RST_POWERON, C::PowerOn, "ESP_RST_POWERON"},
+    {ESP_RST_EXT, C::External, "ESP_RST_EXT"},
+    {ESP_RST_SW, C::Software, "ESP_RST_SW"},
+    {ESP_RST_PANIC, C::Panic, "ESP_RST_PANIC"},
+    {ESP_RST_INT_WDT, C::InterruptWatchdog, "ESP_RST_INT_WDT"},
+    {ESP_RST_TASK_WDT, C::TaskWatchdog, "ESP_RST_TASK_WDT"},
+    {ESP_RST_WDT, C::OtherWatchdog, "ESP_RST_WDT"},
+    {ESP_RST_DEEPSLEEP, C::DeepSleep, "ESP_RST_DEEPSLEEP"},
+    {ESP_RST_BROWNOUT, C::Brownout, "ESP_RST_BROWNOUT"},
+    {ESP_RST_SDIO, C::Unknown, "ESP_RST_SDIO"},
+    {ESP_RST_USB, C::Unknown, "ESP_RST_USB"},
+    {ESP_RST_JTAG, C::Unknown, "ESP_RST_JTAG"},
+    {ESP_RST_EFUSE, C::Unknown, "ESP_RST_EFUSE"},
+    {ESP_RST_PWR_GLITCH, C::PowerGlitch, "ESP_RST_PWR_GLITCH"},
+    {ESP_RST_CPU_LOCKUP, C::Unknown, "ESP_RST_CPU_LOCKUP"},
+}};
+
+const ResetRow& reset_row() {
+  const esp_reset_reason_t r = esp_reset_reason();
+  const auto it = std::ranges::find_if(kResetRows, [r](const ResetRow& row) { return row.esp == r; });
+  return it == kResetRows.end() ? kResetRows[0] : *it;  // 表にない値は「そのほか」（unknown）
 }
 
-std::string_view reset_reason_name() {
-  switch (esp_reset_reason()) {
-    case ESP_RST_UNKNOWN: return "ESP_RST_UNKNOWN";
-    case ESP_RST_POWERON: return "ESP_RST_POWERON";
-    case ESP_RST_EXT: return "ESP_RST_EXT";
-    case ESP_RST_SW: return "ESP_RST_SW";
-    case ESP_RST_PANIC: return "ESP_RST_PANIC";
-    case ESP_RST_INT_WDT: return "ESP_RST_INT_WDT";
-    case ESP_RST_TASK_WDT: return "ESP_RST_TASK_WDT";
-    case ESP_RST_WDT: return "ESP_RST_WDT";
-    case ESP_RST_DEEPSLEEP: return "ESP_RST_DEEPSLEEP";
-    case ESP_RST_BROWNOUT: return "ESP_RST_BROWNOUT";
-    case ESP_RST_SDIO: return "ESP_RST_SDIO";
-    case ESP_RST_USB: return "ESP_RST_USB";
-    case ESP_RST_JTAG: return "ESP_RST_JTAG";
-    case ESP_RST_EFUSE: return "ESP_RST_EFUSE";
-    case ESP_RST_PWR_GLITCH: return "ESP_RST_PWR_GLITCH";
-    case ESP_RST_CPU_LOCKUP: return "ESP_RST_CPU_LOCKUP";
-    default: return "ESP_RST_UNKNOWN";
-  }
-}
+}  // namespace
+
+infra::PlatformResetCause reset_cause() { return reset_row().cause; }
+
+std::string_view reset_reason_name() { return reset_row().name; }
 
 }  // namespace node::platform::esp32

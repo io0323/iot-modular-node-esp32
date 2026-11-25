@@ -81,9 +81,30 @@ bool send_command(RingbufHandle_t ring, CmdHeader h, std::initializer_list<std::
   return xRingbufferSendComplete(ring, p) == rtos::kTrue;
 }
 
-/// 依頼の文字列を取り出す（item の中を指す）
-std::array<std::string_view, 5> strings_of(const CmdHeader& h, const std::uint8_t* item, std::size_t len) {
-  std::array<std::string_view, 5> out{};
+using Strings = std::array<std::string_view, 5>;
+
+/// 受信した電文を control へのリングバッファに積む（esp-mqtt のタスクで動く）。分割された電文（バッファより大きい）と、
+/// いっぱいのときは捨てる。cmd はバッファ（2048）に収まる
+void push_inbound(RingbufHandle_t ring, const esp_mqtt_event_t& e) {
+  if (e.current_data_offset != 0 || e.data_len != e.total_data_len || e.topic_len < 0 || e.data_len < 0) {
+    return;
+  }
+  const InboundHeader h{static_cast<std::uint16_t>(e.topic_len), static_cast<std::uint16_t>(e.data_len)};
+  void* p = nullptr;
+  const std::size_t total = sizeof(h) + h.topic_len + h.payload_len;
+  if (xRingbufferSendAcquire(ring, &p, total, 0) != rtos::kTrue || p == nullptr) {
+    return;
+  }
+  auto* out = static_cast<std::uint8_t*>(p);
+  std::memcpy(out, &h, sizeof(h));
+  std::memcpy(out + sizeof(h), e.topic, h.topic_len);
+  std::memcpy(out + sizeof(h) + h.topic_len, e.data, h.payload_len);
+  (void)xRingbufferSendComplete(ring, p);
+}
+
+/// 依頼の文字列を取り出す（out は item の中を指す）
+void strings_of(const CmdHeader& h, const std::uint8_t* item, std::size_t len, Strings& out) {
+  out = {};
   std::size_t off = sizeof(CmdHeader);
   for (std::size_t i = 0; i < h.count && i < out.size(); ++i) {
     if (off + h.lens[i] + 1 > len) {
@@ -92,7 +113,6 @@ std::array<std::string_view, 5> strings_of(const CmdHeader& h, const std::uint8_
     out[i] = std::string_view(reinterpret_cast<const char*>(item + off), h.lens[i]);
     off += h.lens[i] + 1U;
   }
-  return out;
 }
 
 }  // namespace
@@ -227,6 +247,8 @@ bool EspMqttLink::poll_delivery(std::uint32_t& token) {
 
 // ================= comm の側
 
+// 引数の型は esp_event_handler_t のとおり（const にできない。docs/quality.md の抑止の表）
+// cppcheck-suppress constParameterCallback
 void EspMqttComm::on_event(void* arg, esp_event_base_t /*base*/, std::int32_t id, void* data) {
   // esp-mqtt のタスクで動く。comm・control とはキューとリングバッファだけで受け渡す
   const auto* self = static_cast<const EspMqttComm*>(arg);
@@ -239,24 +261,7 @@ void EspMqttComm::on_event(void* arg, esp_event_base_t /*base*/, std::int32_t id
       ev.kind = MqttEvent::Kind::Published;
       ev.msg_id = e->msg_id;
       break;
-    case MQTT_EVENT_DATA: {
-      // 分割された電文（バッファより大きい）は捨てる。cmd はバッファ（2048）に収まる
-      if (e->current_data_offset != 0 || e->data_len != e->total_data_len || e->topic_len < 0 || e->data_len < 0) {
-        return;
-      }
-      InboundHeader h{static_cast<std::uint16_t>(e->topic_len), static_cast<std::uint16_t>(e->data_len)};
-      void* p = nullptr;
-      const std::size_t total = sizeof(h) + h.topic_len + h.payload_len;
-      if (xRingbufferSendAcquire(self->ch_.inbound, &p, total, 0) != rtos::kTrue || p == nullptr) {
-        return;  // いっぱいなら捨てる
-      }
-      auto* out = static_cast<std::uint8_t*>(p);
-      std::memcpy(out, &h, sizeof(h));
-      std::memcpy(out + sizeof(h), e->topic, h.topic_len);
-      std::memcpy(out + sizeof(h) + h.topic_len, e->data, h.payload_len);
-      (void)xRingbufferSendComplete(self->ch_.inbound, p);
-      return;
-    }
+    case MQTT_EVENT_DATA: push_inbound(self->ch_.inbound, *e); return;
     default: return;
   }
   (void)rtos::queue_send(self->ch_.mqtt_events, &ev, 0);
@@ -285,13 +290,29 @@ void EspMqttComm::stop_client() {
 void EspMqttComm::do_connect(const std::uint8_t* item, std::size_t len) {
   CmdHeader h{};
   std::memcpy(&h, item, sizeof(h));
-  const auto s = strings_of(h, item, len);
+  Strings s{};
+  strings_of(h, item, len, s);
   stop_client();
-  if (!client_id_.assign(s[0]) || !username_.assign(s[1]) || !password_.assign(s[2]) || !will_topic_.assign(s[3]) ||
-      !will_payload_.assign(s[4])) {
+  if (!keep_strings(s)) {
     send_link_event(infra::LinkEvent::ConnectFailed);
     return;
   }
+  const esp_mqtt_client_config_t cfg = config_of(item);
+  if (!apply_config(cfg) || esp_mqtt_client_start(client_) != ESP_OK) {
+    send_link_event(infra::LinkEvent::ConnectFailed);
+    return;
+  }
+  started_ = true;
+}
+
+bool EspMqttComm::keep_strings(const std::array<std::string_view, 5>& s) {
+  return client_id_.assign(s[0]) && username_.assign(s[1]) && password_.assign(s[2]) && will_topic_.assign(s[3]) &&
+         will_payload_.assign(s[4]);
+}
+
+esp_mqtt_client_config_t EspMqttComm::config_of(const void* header) const {
+  CmdHeader h{};
+  std::memcpy(&h, header, sizeof(h));
   esp_mqtt_client_config_t cfg{};
   cfg.broker.address.uri = uri_;
   cfg.credentials.client_id = client_id_.c_str();
@@ -306,28 +327,23 @@ void EspMqttComm::do_connect(const std::uint8_t* item, std::size_t len) {
   cfg.session.keepalive = h.keepalive_s;
   cfg.network.disable_auto_reconnect = true;  // ConnectionManager が再接続する（#104）
   cfg.buffer.size = kBufferSize;
-  if (client_ == nullptr) {
-    client_ = esp_mqtt_client_init(&cfg);
-    if (client_ == nullptr ||
-        esp_mqtt_client_register_event(client_, MQTT_EVENT_ANY, &EspMqttComm::on_event, this) != ESP_OK) {
-      send_link_event(infra::LinkEvent::ConnectFailed);
-      return;
-    }
-  } else if (esp_mqtt_set_config(client_, &cfg) != ESP_OK) {
-    send_link_event(infra::LinkEvent::ConnectFailed);
-    return;
+  return cfg;
+}
+
+bool EspMqttComm::apply_config(const esp_mqtt_client_config_t& cfg) {
+  if (client_ != nullptr) {
+    return esp_mqtt_set_config(client_, &cfg) == ESP_OK;
   }
-  if (esp_mqtt_client_start(client_) != ESP_OK) {
-    send_link_event(infra::LinkEvent::ConnectFailed);
-    return;
-  }
-  started_ = true;
+  client_ = esp_mqtt_client_init(&cfg);
+  return client_ != nullptr &&
+         esp_mqtt_client_register_event(client_, MQTT_EVENT_ANY, &EspMqttComm::on_event, this) == ESP_OK;
 }
 
 void EspMqttComm::do_publish(const std::uint8_t* item, std::size_t len) {
   CmdHeader h{};
   std::memcpy(&h, item, sizeof(h));
-  const auto s = strings_of(h, item, len);
+  Strings s{};
+  strings_of(h, item, len, s);
   if (!started_ || !session_connected_ || !topic_.assign(s[0])) {
     if (h.token != 0) {
       send_delivery(h.token, false);
@@ -354,7 +370,8 @@ void EspMqttComm::handle_command(const std::uint8_t* item, std::size_t len) {
     case Cmd::Connect: do_connect(item, len); return;
     case Cmd::Disconnect: stop_client(); return;
     case Cmd::Subscribe: {
-      const auto s = strings_of(h, item, len);
+      Strings s{};
+  strings_of(h, item, len, s);
       if (started_ && session_connected_ && topic_.assign(s[0])) {
         (void)esp_mqtt_client_subscribe_single(client_, topic_.c_str(), h.qos);
       }

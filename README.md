@@ -5,12 +5,16 @@
 種類の違う複数のセンサーとアクチュエーターを共通のインターフェースで扱う、ESP32-S3 向けのスマート制御ユニットのファームウェアです（C++20、作品02「モジュール型スマートデバイス制御システム」、device_id `mcu-cpp-01`）。
 機器の追加・交換は「新しいクラス＋構成表1行」で済み、既存のクラスは変更しない設計を主題にしています。上位（作品03）とは MQTT でやり取りします。
 
-**いまの段階（P5）**：PC で動くホスト版です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
+**いまの段階（P6）**：PC で動くホスト版と、ESP32-S3 向けのターゲット版（ESP-IDF v5.5.6。ビルドまで）です。MQTT に接続して telemetry・event・state を送り、cmd を受けて cmd/ack を返します。
 制御の中核（5段の調停・安全インターロック・自動／手動／省電力のモード・ローカルルール・センサー故障の扱い）と、
 機器のドライバ（BME280・BH1750・土壌水分・PWM・リレー・SSD1306・ボタン）まであります。ドライバはデータシートのレジスタ応答を再現するフェイクで確かめています。
 通信は「ネットワーク → 時刻の同期 → MQTT」の順に接続し、切れたら 1・2・4…60 秒の間隔でつなぎ直します。送れない間のイベントは32件まで保持し、
 確認の取れなかった event は同じ電文のまま送り直し、つなぎ直したら UPSTREAM_LOST・UPSTREAM_RESTORED で切れていた間を知らせます。
-ESP-IDF のターゲット版・実機のドライバ・エミュレーターはまだありません（下の「フェーズ」）。**実機では確かめていません。**
+ターゲット版は FreeRTOS の4つのタスク（control・sense・comm・ui）に分け、アプリのロジックは control のタスクだけで動かします。
+エミュレーターでの実行はまだありません（P7）。**実機では確かめていません。**
+
+**基本設計書との差（P6）**：省電力モードのライトスリープは入れていません（消費電流を測れず確かめられないため。計測周期の5倍と表示の消灯だけ。実機フェーズで入れる。open-questions #107）。
+ルールのしきい値と周期の NVS への保存（FR-12）も入れていません（#108）。
 
 ## 対応する共通仕様
 
@@ -23,6 +27,7 @@ P1 の時点で v0.2.2 のタグはまだないため v0.2.1 に固定してい�
 |---|---|---|---|
 | iot-common-spec | v0.2.1（e6280d0） | git submodule | Schema・サンプル・プロファイル・Mosquitto の設定・契約テストキット |
 | Eclipse Paho MQTT C | v1.3.16 | FetchContent | ホスト版の MQTT クライアント（MQTTAsync、TLS なし、静的ライブラリ） |
+| ESP-IDF | v5.5.6（esp-mqtt 0e9ec171） | Docker イメージ `espressif/idf:v5.5.6` | ターゲット版（ESP32-S3）のビルド |
 | jsmn | 25647e692c7906b96ffd2b05ca54c097948e879c | FetchContent | cmd の JSON の字句解析（ヒープを使わない） |
 | GoogleTest（gMock を含む） | v1.18.0 | FetchContent | 単体テスト・ホスト結合テスト |
 
@@ -73,6 +78,28 @@ tools/quality.sh all   # coverage・tidy・cppcheck・lizard・doxygen（出力�
 | 循環的複雑度（lizard） | 最大 10（平均 2.4） | 10 以下 |
 | Doxygen（公開 API） | 警告 0 件 | 0 件 |
 | ThreadSanitizer | CTest・契約テスト・broker_restart.py で指摘 0 件（Paho の中だけの 2 件を抑止。open-questions #89・#93） | 0 件 |
+
+## ターゲット版（ESP32-S3、ESP-IDF v5.5.6）
+
+ESP-IDF は **v5.5.6** に固定し、Espressif の公式 Docker イメージ `espressif/idf:v5.5.6` でビルドします（Mac も CI も同じ。open-questions #94）。
+
+```sh
+cp firmware/sdkconfig.defaults.local.example firmware/sdkconfig.defaults.local   # Wi-Fi・MQTT の値を入れる（コミットしない）
+docker run --rm -v "$PWD":/project -w /project/firmware espressif/idf:v5.5.6 \
+  bash -c '. $IDF_PATH/export.sh >/dev/null && idf.py -B /project/build/firmware build size'
+```
+
+- 接続の情報は Kconfig の `NODE_WIFI_SSID`・`NODE_WIFI_PASSWORD`・`NODE_MQTT_URL`・`NODE_MQTT_PASSWORD`・`NODE_SITE`（既定は空）。`firmware/sdkconfig.defaults.local` があれば `sdkconfig.defaults` に重ねる（#102）
+- SNTP の1つ目は MQTT のブローカーと同じホスト、2つ目は `pool.ntp.org`（`NODE_SNTP_SERVER1`・`2` で変えられる。#103）
+- ピンの割り当て（仮、ESP32-S3-DevKitC-1）：I2C0 SDA GPIO8・SCL GPIO9、土壌水分 GPIO1（ADC1）、fan_main GPIO4・led_grow GPIO5・buzzer GPIO6（LEDC）、ポンプのリレー GPIO7、MODE ボタン GPIO10・ACTION ボタン GPIO11（`src/config/esp32_pins.hpp`。#105）
+- イメージの大きさ（P6）：全体 1,011,045 バイト、DIRAM 88.8%（[docs/quality.md](docs/quality.md)）
+
+| タスク | 優先度 | コア | 周期 | 呼ぶもの |
+|---|---|---|---|---|
+| control | 6 | 1 | 10ms | Node（app のクラスはここからだけ） |
+| sense | 5 | 1 | 依頼を待つ | drivers::SensorIo（センサーの read・init・回復） |
+| comm | 4 | 0 | 依頼を待つ（20ms） | esp-mqtt の API |
+| ui | 3 | 1 | 20ms | drivers::UiIo（ボタン・OLED） |
 
 ## 動かし方（ホスト版）
 
@@ -155,6 +182,8 @@ src/
   drivers/sim/    ホスト用の模擬センサー・模擬アクチュエーター
   config/         構成表（devices.cpp：模擬機器、fakehw.cpp：ドライバとフェイク）
   platform/host/  Paho・時計・時刻の同期・ネットワーク（模擬）・乱数・JSON Lines のログ・デバッグ入力・main（POSIX・Paho を使えるのはここだけ）
+  platform/esp32/ ESP-IDF の hal・infra の実装、タスク、app_main（ESP-IDF・FreeRTOS を使えるのはここだけ）
+firmware/         ESP-IDF のプロジェクト（src/ をコンポーネント node_core・node_platform_esp32 として読む）
 tests/unit/  tests/integration/  tests/system/（broker_restart.py）
 tools/          品質のイメージ（docker/quality.Dockerfile）・quality.sh・TSan の抑止（tsan.supp）
 ```
@@ -167,9 +196,9 @@ tools/          品質のイメージ（docker/quality.Dockerfile）・quality.s
 | P2 | ControlArbiter の5段の優先度、ModeManager、RuleEngine、インターロックの残り | 完了（PR #2） |
 | P3 | 機器ドライバと I2C フェイク、ボタンと表示 | 完了（PR #3） |
 | P4 | SNTP 同期後の接続、イベント保持、指数バックオフ、送信量の制限、ブローカー停止・復旧 | 完了（PR #4） |
-| P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | 進行中 |
-| P6 | ESP-IDF ターゲット版 | — |
+| P5 | 品質ゲート（カバレッジ・clang-tidy・cppcheck・lizard・Doxygen・ThreadSanitizer） | 完了（PR #5） |
+| P6 | ESP-IDF ターゲット版 | 進行中 |
 | P7 | エミュレーター（QEMU・Wokwi） | — |
 | P8 | 拡張性の実証（SHT31 を追加する PR）と書類の仕上げ | — |
 
-書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。
+書類：[要件定義・基本設計書（写し）](docs/design/01-requirements-basic-design.md)、プロンプト（[P1](docs/prompts/P1-prompt.md)・[P2](docs/prompts/P2-prompt.md)・[P3](docs/prompts/P3-prompt.md)・[P4](docs/prompts/P4-prompt.md)・[P5](docs/prompts/P5-prompt.md)・[P6](docs/prompts/P6-prompt.md)）、[品質ゲート](docs/quality.md)、[未決の論点](docs/open-questions.md)。
