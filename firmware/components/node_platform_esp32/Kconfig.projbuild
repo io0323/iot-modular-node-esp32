@@ -30,4 +30,34 @@ menu "mcu-cpp-01 (portfolio 02)"
         string "2nd SNTP server"
         default "pool.ntp.org"
 
+    # ---- 試験用（P7。どれも既定は無効。製品の構成では使わない。open-questions #119・#120・#128）
+
+    config NODE_NET_QEMU_ETH
+        bool "TEST: use QEMU OpenCores Ethernet instead of Wi-Fi (emulator only)"
+        default n
+        select ETH_USE_OPENETH
+        help
+            QEMU does not emulate Wi-Fi on ESP32-S3. With this option the network is the
+            OpenCores Ethernet MAC of QEMU. It does not work on a real chip.
+
+    config NODE_TEST_NO_ADC
+        bool "TEST: do not use the ADC (QEMU does not emulate the ESP32-S3 ADC)"
+        default n
+        help
+            The startup self-calibration of esp_adc (adc_hw_calibration, a global constructor)
+            waits for the SAR ADC forever in QEMU. With this option the ADC driver is not linked
+            and the soil moisture sensor reports a read error (fault).
+
+    config NODE_TEST_HANG_TASK
+        bool "TEST: stop feeding the task watchdog from the ui task after 10 s"
+        default n
+        help
+            Only for the watchdog test in the emulator. The next BOOT must report watchdog.
+
+    config NODE_WIFI_ALLOW_OPEN
+        bool "TEST: allow an open Wi-Fi access point (Wokwi-GUEST)"
+        default n
+        help
+            Only for the Wokwi simulator. The product configuration requires WPA2-PSK or better.
+
 endmenu

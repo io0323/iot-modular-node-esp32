@@ -108,6 +108,39 @@ class NodeTest : public ::testing::Test {
   [[nodiscard]] std::string last_telemetry() const { return link.on("telemetry").back().payload; }
 };
 
+TEST(NodeStart, SensorInitFailureDoesNotStopStartAndBecomesSensorFault) {
+  // #130：センサーの初期化に失敗しても起動を止めず、BOOT を入れ、最初の計測で SENSOR_FAULT にする
+  test::FakeClock clock;
+  test::FakeTimeSync sync;
+  test::FakeNetwork network;
+  test::FakeRandom rng;
+  test::FakeMqttLink link;
+  test::CapturingLog log;
+  drivers::SimSensor soil{"soil_moisture", kSoil, kSoilVal, 10000ms};
+  std::array<domain::ISensor*, 1> sensors{&soil};
+  drivers::SimActuator pump{kPump};
+  std::array<domain::ActuatorBinding, 1> actuators{{{&pump, {}}}};
+  const domain::DeviceRegistry registry(sensors, actuators);
+  drivers::SensorIo sensor_io{registry.sensors()};
+  drivers::UiIo ui_io{registry.ui()};
+  soil.set_fault(true);  // init も read も失敗する
+  Node node(NodeConfig{}, registry, sensor_io, ui_io, link, network, sync, clock, rng, log);
+  ASSERT_TRUE(node.start());
+  EXPECT_EQ(node.pending_events(), 1U);  // BOOT
+  bool logged = false;
+  for (const auto& l : log.lines) logged |= l.event == "init_failed" && l.fields.find("soil_moisture") != std::string::npos;
+  EXPECT_TRUE(logged);
+  for (int i = 0; i < 20; ++i) {
+    clock.advance(10);
+    node.tick();
+  }
+  const auto events = link.on("event");
+  ASSERT_GE(events.size(), 2U);
+  EXPECT_EQ(json_value(events[0].payload, "code"), "BOOT");
+  EXPECT_EQ(json_value(events[1].payload, "code"), "SENSOR_FAULT");
+  EXPECT_EQ(json_value(events[1].payload, "channel"), "soil");
+}
+
 TEST_F(NodeTest, ConnectsWithLwtThenSendsOnlineStateThenBoot) {
   node->tick();
   ASSERT_EQ(link.connects.size(), 1U);

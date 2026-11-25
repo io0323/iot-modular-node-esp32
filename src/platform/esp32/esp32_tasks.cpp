@@ -5,7 +5,9 @@
 #include "drivers/ui_io.hpp"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
+#include "esp_log.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 #include "infra/json_writer.hpp"
 #include "platform/esp32/esp32_hal.hpp"
 #include "platform/esp32/esp32_mqtt.hpp"
@@ -34,7 +36,10 @@ constexpr std::uint32_t kControlPeriodMs = 10;
 constexpr std::uint32_t kUiPeriodMs = 20;
 constexpr std::uint32_t kCommWaitMs = 20;
 constexpr std::uint32_t kSenseWaitMs = 100;
-constexpr std::uint64_t kStatsIntervalMs = 60000;  ///< スタックの残りとヒープのログ（#97・NFR-03）
+constexpr std::uint64_t kStatsIntervalMs = 60000;
+#if CONFIG_NODE_TEST_HANG_TASK
+constexpr std::uint64_t kHangAfterMs = 10000;  ///< 試験用：ui が止まるまで（#119）
+#endif  ///< スタックの残りとヒープのログ（#97・NFR-03）
 
 std::uint64_t now_ms() { return static_cast<std::uint64_t>(esp_timer_get_time()) / 1000U; }
 
@@ -96,12 +101,28 @@ void comm_task(void* arg) {
   }
 }
 
+#if CONFIG_NODE_TEST_HANG_TASK
+/// 試験用（#119）：起動から10秒で、ui のタスクがタスクウォッチドッグに知らせるのをやめる（止まったタスクの代わり）
+void hang_for_watchdog_test() {
+  if (now_ms() < kHangAfterMs) {
+    return;
+  }
+  ESP_LOGW("node", "NODE_TEST_HANG_TASK: ui task stops feeding the task watchdog");
+  for (;;) {
+    vTaskDelay(ticks_of(1000));
+  }
+}
+#endif
+
 void ui_task(void* arg) {
   auto& ctx = *static_cast<TaskContext*>(arg);
   (void)esp_task_wdt_add(nullptr);
   TickType_t wake = xTaskGetTickCount();
   for (;;) {
     (void)xTaskDelayUntil(&wake, ticks_of(kUiPeriodMs));
+#if CONFIG_NODE_TEST_HANG_TASK
+    hang_for_watchdog_test();
+#endif
     (void)esp_task_wdt_reset();
     for (domain::UiInput in{}; ctx.ui->poll_input(now_ms(), in);) {
       (void)rtos::queue_send(ctx.queues.ui_inputs, &in, 0);

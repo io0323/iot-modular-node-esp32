@@ -1,0 +1,10 @@
+# QEMU（ESP-IDF v5.5.6 同梱の qemu-xtensa）で動かす構成（P7 の決定 #119・#120）。tools/qemu.sh が sdkconfig.defaults に重ねる。
+# QEMU は ESP32-S3 の Wi-Fi・I2C・LEDC・GPIO matrix を再現しない（esp-toolchain-docs の qemu/README.md）ので、
+# ネットワークは OpenCores Ethernet（ユーザーモードの NAT）。ホストの Mosquitto は 10.0.2.2（NAT のゲートウェイ）に見える
+CONFIG_NODE_NET_QEMU_ETH=y
+CONFIG_NODE_MQTT_URL="mqtt://10.0.2.2:1883"
+# 10.0.2.2 には NTP がないので、SNTP は2つともインターネット（NAT 経由）
+CONFIG_NODE_SNTP_SERVER1="pool.ntp.org"
+CONFIG_NODE_SNTP_SERVER2="time.google.com"
+# esp_adc の起動時の自己校正（adc_hw_calibration）が、QEMU が再現しない SAR ADC を待ち続けるので、ADC を使わない（#129）
+CONFIG_NODE_TEST_NO_ADC=y
