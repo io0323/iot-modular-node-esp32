@@ -15,9 +15,13 @@ class IDebugTarget {
  public:
   virtual ~IDebugTarget() = default;
   /// @brief チャネルの値を変える（単位はそのチャネルの単位）。
+  /// @param channel チャネル名
+  /// @param value 値
   /// @return そのチャネルを扱えなければ false
   virtual bool set_value(std::string_view channel, double value) = 0;
   /// @brief センサーを読めなくする・戻す。
+  /// @param sensor_id センサーの ID
+  /// @param fault 読めなくするなら true
   /// @return そのセンサーを扱えなければ false
   virtual bool set_fault(std::string_view sensor_id, bool fault) = 0;
 };
@@ -45,6 +49,8 @@ class DebugInputs {
   /// @param log ログ
   void apply_due(std::uint64_t elapsed_ms, app::Node& node, IDebugTarget& target, infra::ILogSink& log);
 
+  /// @brief 入力がないか。
+  /// @return なければ true
   [[nodiscard]] bool empty() const { return actions_.empty(); }
 
  private:

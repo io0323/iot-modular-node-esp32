@@ -15,10 +15,12 @@ namespace node::domain {
 /// 品質の判定はルールとインターロックの入力にだけ使う（telemetry には読めたチャネルの値と品質をそのまま送る）。
 class ReadingStore {
  public:
-  static constexpr std::size_t kMaxChannels = 16;
-  static constexpr std::uint32_t kStaleFactor = 3;
+  static constexpr std::size_t kMaxChannels = 16;  ///< チャネルの上限
+  static constexpr std::uint32_t kStaleFactor = 3;  ///< 計測周期の何倍の間 good で読めなければ stale にするか
 
   /// @brief チャネルを登録し、いまの計測周期を決める（省電力モードでは5倍の値。#39）。
+  /// @param channel チャネル名
+  /// @param period_ms 計測周期
   /// @return 容量がいっぱいなら false
   [[nodiscard]] bool set_period(std::string_view channel, std::uint32_t period_ms);
 
@@ -29,22 +31,31 @@ class ReadingStore {
   [[nodiscard]] bool update(const Reading& r, std::uint64_t now_ms);
 
   /// @brief 読めなかったことを記録する（値はそのまま、quality を fault にする）。
+  /// @param channel チャネル名
+  /// @param now_ms 読もうとした時刻（単調時計の ms）
   /// @return 容量がいっぱいで足せなければ false
   [[nodiscard]] bool mark_fault(std::string_view channel, std::uint64_t now_ms);
 
   /// @brief チャネルの最新値（品質はセンサーが返したもの。stale の判定は quality() を使う）。
+  /// @param channel チャネル名
   /// @return まだ一度も記録していなければ std::nullopt
   [[nodiscard]] std::optional<Reading> latest(std::string_view channel) const;
 
   /// @brief 本体側で判定した品質。fault が最優先、次に stale（一度も good で読めていない、または古い）。
   /// @param channel チャネル名
   /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 品質
   [[nodiscard]] Quality quality(std::string_view channel, std::uint64_t now_ms) const;
 
   /// @brief 最後に good で読めた値（1/1000 単位）。一度も読めていなければ 0（故障中の telemetry の value。P3 の決定 #52）。
+  /// @param channel チャネル名
+  /// @return 値（1/1000 単位）
   [[nodiscard]] std::int32_t last_good_value(std::string_view channel) const;
 
   /// @brief good と判定できるなら値（1/1000 単位）を返す。ルールとインターロックの入力に使う。
+  /// @param channel チャネル名
+  /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 値。good でなければ std::nullopt
   [[nodiscard]] std::optional<std::int32_t> good_value(std::string_view channel, std::uint64_t now_ms) const;
 
  private:

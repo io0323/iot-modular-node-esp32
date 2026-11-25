@@ -39,7 +39,7 @@ constexpr std::string_view to_string(ErrorCode code) {
 
 /// @brief エラー。種類と、静的な領域にある短い説明を持つ。
 struct Error {
-  ErrorCode code{ErrorCode::Internal};
+  ErrorCode code{ErrorCode::Internal};  ///< 種類
   std::string_view what;  ///< 文字列リテラルなど、寿命の長い文字列だけを入れる
 };
 

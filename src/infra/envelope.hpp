@@ -33,7 +33,7 @@ constexpr std::string_view schema_of(Kind k) {
 
 /// @brief 電文の時刻。発生時の単調時計（ms）だけを持ち、ts と uptime_ms は送るときに求める（P4 の決定 #65）。
 struct Stamp {
-  std::uint64_t monotonic_ms{0};
+  std::uint64_t monotonic_ms{0};  ///< 発生時の単調時計（ms）
 };
 
 /// @brief 共通エンベロープ（共通仕様 第3章）を組み立てる。
@@ -50,21 +50,34 @@ class EnvelopeFactory {
   EnvelopeFactory(std::string_view device_id, const IClock& clock, const ITimeSync& sync, IRandom& rng);
 
   /// @brief boot_id（16進小文字8桁）。
+  /// @return boot_id
   [[nodiscard]] std::string_view boot_id() const { return boot_id_.view(); }
+  /// @brief 発信元。
+  /// @return device_id
   [[nodiscard]] std::string_view device_id() const { return device_id_; }
   /// @brief 次に使う seq。
+  /// @param k 種類
+  /// @return seq
   [[nodiscard]] std::uint32_t peek_seq(Kind k) const { return seq_[index_of(k)]; }
   /// @brief seq を1つ進める（uint32 で一周）。
+  /// @param k 種類
   void commit_seq(Kind k) { ++seq_[index_of(k)]; }
   /// @brief seq を直接決める（一周のテスト用）。
+  /// @param k 種類
+  /// @param seq 次に使う seq
   void set_seq_for_test(Kind k, std::uint32_t seq) { seq_[index_of(k)] = seq; }
   /// @brief いまの時刻。
+  /// @return いまの単調時計の Stamp
   [[nodiscard]] Stamp now() const { return Stamp{clock_.monotonic_ms()}; }
   /// @brief 時刻の UTC（単調時計＋同期の差）。
+  /// @param stamp 時刻
+  /// @return UTC の ms（1970-01-01 から）
   [[nodiscard]] std::int64_t utc_of(const Stamp& stamp) const {
     return static_cast<std::int64_t>(stamp.monotonic_ms) + sync_.utc_offset_ms();
   }
   /// @brief 時刻の uptime_ms（起動からの経過。uint32 で約49日で一周）。
+  /// @param stamp 時刻
+  /// @return uptime_ms
   [[nodiscard]] std::uint32_t uptime_of(const Stamp& stamp) const {
     const std::uint64_t up = stamp.monotonic_ms >= boot_monotonic_ms_ ? stamp.monotonic_ms - boot_monotonic_ms_ : 0;
     return static_cast<std::uint32_t>(up & 0xFFFFFFFFU);

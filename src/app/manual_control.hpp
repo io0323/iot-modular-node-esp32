@@ -18,24 +18,33 @@ class ManualControl {
   /// @brief set_manual の結果。
   enum class Outcome : std::uint8_t { Accepted, NotManualMode, UnknownTarget };
 
+  /// @brief 本体の手動操作を受け持つ。
+  /// @param arbiter 出力（手動の段）
+  /// @param modes モード（手動モードのときだけ受け付ける）
   ManualControl(ControlArbiter& arbiter, ModeManager& modes) : arbiter_(arbiter), modes_(modes) {}
 
   /// @brief 手動の出力を決める。
   /// @param id アクチュエーター
   /// @param level 出力（min〜max に収める）
   /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 受け付けたか、受け付けなかった理由
   Outcome set_manual(std::string_view id, domain::Level level, std::uint64_t now_ms);
 
   /// @brief 手動の設定をすべて消す（手動モードを出たとき）。
   void clear() { arbiter_.clear_manual(); }
 
   /// @brief 操作する機器を次に選び直す（構成表の順に一周する。P3 の決定 #34）。手動モードでなければ何もしない。
+  /// @return 選び直したか、しなかった理由
   Outcome select_next();
   /// @brief 選んでいる機器を 0 と 1000 で切り替える（P3 の決定 #34）。手動モードでなければ何もしない。
+  /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 切り替えたか、しなかった理由
   Outcome toggle_selected(std::uint64_t now_ms);
   /// @brief 選んでいる機器の番号。
+  /// @return 番号
   [[nodiscard]] std::size_t selected() const { return selected_; }
   /// @brief 選んでいる機器の ID。
+  /// @return ID（機器がなければ空）
   [[nodiscard]] std::string_view selected_id() const;
 
  private:

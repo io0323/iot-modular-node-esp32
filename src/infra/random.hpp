@@ -15,6 +15,7 @@ class IRandom {
   virtual void fill(std::span<std::uint8_t> out) = 0;
 
   /// @brief 32ビットの乱数。
+  /// @return 乱数
   std::uint32_t next_u32() {
     std::array<std::uint8_t, 4> b{};
     fill(b);

@@ -51,6 +51,8 @@ class FakeHwRig {
   FakeHwRig& operator=(FakeHwRig&&) = delete;
   ~FakeHwRig() = default;
 
+  /// @brief 機器の一覧（Node に渡す）。
+  /// @return センサー・アクチュエーター・ルール・UI の機器
   [[nodiscard]] domain::DeviceRegistry registry() {
     return domain::DeviceRegistry(sensors_, actuators_, kRules,
                                   domain::UiDevices{&mode_button_, &action_button_, &display_});

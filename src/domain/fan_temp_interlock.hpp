@@ -14,6 +14,7 @@ namespace node::domain {
 /// （off_milli 以上に戻ったら数え直す）。入力が good でない間は状態をそのまま持ち、数えはやり直す（#38）。
 class FanTempInterlock final : public IInterlock {
  public:
+  /// @brief 構成表で決める値（P2 の決定 #21）。
   struct Config {
     std::string_view channel;  ///< 入力（temp_air）
     std::int32_t on_milli;     ///< 効く値（45.0℃ → 45000）
@@ -22,6 +23,8 @@ class FanTempInterlock final : public IInterlock {
     Level force;               ///< 固定する値（1000）
   };
 
+  /// @brief インターロックを作る。
+  /// @param config 構成表の値
   explicit FanTempInterlock(const Config& config) : config_(config) {}
 
   [[nodiscard]] std::string_view rule() const override { return "temp_high"; }

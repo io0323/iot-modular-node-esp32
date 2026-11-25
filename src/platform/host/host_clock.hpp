@@ -20,6 +20,8 @@ class HostClock final : public infra::IClock {
 /// （--sntp-delay。P4）。差は system_clock − steady_clock の最新の値。
 class HostTimeSync final : public infra::ITimeSync {
  public:
+  /// @brief 時刻の同期を作る。
+  /// @param delay_ms 起動から同期済みになるまでの時間（--sntp-delay）
   explicit HostTimeSync(std::uint32_t delay_ms = 0);
   [[nodiscard]] bool synced() const override;
   [[nodiscard]] std::int64_t utc_offset_ms() const override;
@@ -35,10 +37,12 @@ class HostNetwork final : public infra::INetwork {
  public:
   /// @brief 使えない時間帯（起動からの ms、[begin, end)）。
   struct Window {
-    std::uint64_t begin_ms;
-    std::uint64_t end_ms;
+    std::uint64_t begin_ms;  ///< 始まり（起動からの ms）
+    std::uint64_t end_ms;    ///< 終わり（起動からの ms。この時刻は使える）
   };
 
+  /// @brief ネットワークを作る。
+  /// @param down_windows 使えない時間帯（--net-down）
   explicit HostNetwork(std::vector<Window> down_windows = {});
   support::Result<void> connect() override;
   [[nodiscard]] bool up() const override { return up_; }

@@ -22,8 +22,8 @@ class Ssd1306 final : public domain::IDisplay {
   static constexpr std::uint8_t kAddrSa0High = 0x3D;  ///< "b0111101"（同）
   /// 制御バイト：Co = 0（以後はデータだけ）、D/C# = 0 でコマンド、1 で GDDRAM のデータ（データシート 8.1.5 節 5)）
   static constexpr std::uint8_t kControlCommands = 0x00;
-  static constexpr std::uint8_t kControlData = 0x40;
-  static constexpr std::size_t kWidth = 128;
+  static constexpr std::uint8_t kControlData = 0x40;  ///< 制御バイト：GDDRAM のデータ（上の説明を参照）
+  static constexpr std::size_t kWidth = 128;           ///< 列の数（ドット）
   static constexpr std::size_t kPages = 8;  ///< 8 ページ × 8 ドット（データシート 8.7 節 図8-13）
   static constexpr std::size_t kCellWidth = 6;  ///< 5 ドットの文字＋1 ドットの間
 
@@ -51,6 +51,8 @@ class Ssd1306 final : public domain::IDisplay {
   static constexpr std::uint8_t kLowerColumn = 0x00;   ///< 00h〜0Fh（10.1.1 節）
   static constexpr std::uint8_t kHigherColumn = 0x10;  ///< 10h〜1Fh（10.1.2 節）
 
+  /// @brief ドライバを作る。
+  /// @param dev I2C の宛先（アドレスは 0x3C か 0x3D）
   explicit Ssd1306(hal::I2cDevice dev) : dev_(dev) {}
 
   support::Result<void> init() override;
@@ -58,6 +60,7 @@ class Ssd1306 final : public domain::IDisplay {
   support::Result<void> show(std::span<const std::string_view> lines) override;
 
   /// @brief フレームバッファ（1,024 バイト。ページ順、各ページ 128 バイト）。
+  /// @return フレームバッファ
   [[nodiscard]] const std::array<std::uint8_t, kWidth * kPages>& framebuffer() const { return fb_; }
 
  private:

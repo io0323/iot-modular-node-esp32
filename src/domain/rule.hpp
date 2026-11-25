@@ -21,7 +21,7 @@ enum class Comparison : std::uint8_t {
 struct Rule {
   std::string_view id;              ///< 例："light-on-dark"
   std::string_view channel;         ///< 入力
-  Comparison enter{Comparison::Below};
+  Comparison enter{Comparison::Below};  ///< 入る条件の比べ方
   std::int32_t enter_milli{0};      ///< 入る条件のしきい値（1/1000 単位）
   std::optional<std::int32_t> exit_milli;  ///< 出る条件のしきい値（パルスのルールにはない）
   std::string_view actuator;        ///< 対象

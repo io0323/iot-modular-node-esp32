@@ -29,8 +29,12 @@ constexpr std::string_view to_string(RejectReason r) {
 
 /// @brief cmd を処理した結果。
 struct CommandOutcome {
-  enum class Kind : std::uint8_t { Discarded, Ack };
-  Kind kind{Kind::Discarded};
+  /// @brief 結果の種類。
+  enum class Kind : std::uint8_t {
+    Discarded,  ///< ack を返さずに捨てた
+    Ack,        ///< ack を返す
+  };
+  Kind kind{Kind::Discarded};  ///< 結果の種類
   infra::DiscardReason discard{infra::DiscardReason::NotJson};  ///< Discarded のときの理由
   bool duplicate{false};                                       ///< 重複した cmd_id（実行していない）
   domain::CmdDedupCache::Payload ack_payload;                  ///< cmd/ack の payload（"{...}"）

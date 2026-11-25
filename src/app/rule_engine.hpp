@@ -22,16 +22,18 @@ namespace node::app {
 /// - 同じアクチュエーターに複数のルールが提案したら、大きい方の level を使う
 class RuleEngine {
  public:
-  static constexpr std::size_t kMaxRules = 16;
+  static constexpr std::size_t kMaxRules = 16;  ///< ルールの上限
 
   /// @brief アクチュエーターごとの提案。
   struct Proposal {
-    std::string_view actuator;
-    domain::Level level{0};
+    std::string_view actuator;  ///< アクチュエーターの ID
+    domain::Level level{0};     ///< 提案の出力
   };
+  /// @brief 1周分の提案。
   using Proposals = support::StaticVector<Proposal, kMaxRules>;
 
   /// @brief ルールを受け取る（kMaxRules 件まで）。
+  /// @param rules ルール（寿命はプログラム全体）
   explicit RuleEngine(std::span<const domain::Rule> rules);
 
   /// @brief ルールを評価し、提案を出す。

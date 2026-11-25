@@ -14,6 +14,8 @@ namespace node::app {
 /// 全アクチュエーターの level・owner を1件の telemetry にして送る（QoS 0）。計測の周期は SensorPoller が決める（省電力モードは5倍）。未接続の間は送らない（telemetry は保持しない。FR-11）。
 class TelemetryService {
  public:
+  /// @brief telemetry を受け持つ。
+  /// @param arbiter 出力（actuators[]）
   explicit TelemetryService(const ControlArbiter& arbiter) : arbiter_(arbiter) {}
 
   /// @brief 読めた計測値があれば telemetry を送る。

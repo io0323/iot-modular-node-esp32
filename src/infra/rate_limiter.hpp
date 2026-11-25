@@ -52,10 +52,12 @@ class TokenBucket {
 /// @brief kind ごとの送信量の上限（共通仕様 第4章：平均毎秒10件・瞬間50件）。
 class RateLimiter {
  public:
-  static constexpr std::uint32_t kRatePerS = 10;
-  static constexpr std::uint32_t kBurst = 50;
+  static constexpr std::uint32_t kRatePerS = 10;  ///< 平均の上限（毎秒）
+  static constexpr std::uint32_t kBurst = 50;     ///< 瞬間の上限
 
   /// @brief kind の1件分を取る。
+  /// @param k 種類
+  /// @param now_ms いまの単調時計
   /// @return 上限を超えるなら false
   [[nodiscard]] bool try_take(Kind k, std::uint64_t now_ms) { return buckets_[index_of(k)].try_take(now_ms); }
 

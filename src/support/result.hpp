@@ -26,17 +26,23 @@ class [[nodiscard]] Result {
   Result(const Error& error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
 
   /// @brief 成功したか。
+  /// @return 成功なら true
   [[nodiscard]] bool has_value() const { return ok_; }
   /// @brief 成功したか。
   explicit operator bool() const { return ok_; }
 
   /// @brief 値（成功のときだけ呼ぶ）。
+  /// @return 値
   [[nodiscard]] T& value() & { return value_; }
   /// @brief 値（成功のときだけ呼ぶ）。
+  /// @return 値
   [[nodiscard]] const T& value() const& { return value_; }
   /// @brief 値。失敗なら fallback を返す。
+  /// @param fallback 失敗のときの値
+  /// @return 値か fallback
   [[nodiscard]] T value_or(T fallback) const { return ok_ ? value_ : fallback; }
   /// @brief エラー（失敗のときだけ意味がある）。
+  /// @return エラー
   [[nodiscard]] Error error() const { return error_; }
 
  private:
@@ -57,10 +63,12 @@ class [[nodiscard]] Result<void> {
   Result(const Error& error) : ok_(false), error_(error) {}  // NOLINT(google-explicit-constructor)
 
   /// @brief 成功したか。
+  /// @return 成功なら true
   [[nodiscard]] bool has_value() const { return ok_; }
   /// @brief 成功したか。
   explicit operator bool() const { return ok_; }
   /// @brief エラー（失敗のときだけ意味がある）。
+  /// @return エラー
   [[nodiscard]] Error error() const { return error_; }
 
  private:

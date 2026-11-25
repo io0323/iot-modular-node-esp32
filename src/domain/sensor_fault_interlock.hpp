@@ -16,6 +16,7 @@ class SensorFaultInterlock final : public IInterlock {
   /// @brief かけ方。
   enum class Action : std::uint8_t { Force, Upper };
 
+  /// @brief 構成表で決める値。
   struct Config {
     std::string_view channel;  ///< 見張るチャネル
     Action action;             ///< 固定か上限か
@@ -23,6 +24,8 @@ class SensorFaultInterlock final : public IInterlock {
     bool rejects_commands;     ///< 効いている間の set_actuator を rejected（unsafe）にする
   };
 
+  /// @brief インターロックを作る。
+  /// @param config 構成表の値
   explicit SensorFaultInterlock(const Config& config) : config_(config) {}
 
   [[nodiscard]] std::string_view rule() const override { return "sensor_fault"; }

@@ -10,8 +10,8 @@ namespace node::domain {
 /// 起点はデバイスの受信時刻（単調時計の ms）で、「起点＋lease_s×1000」ちょうどで期限切れになる。
 class Lease {
  public:
-  static constexpr std::uint32_t kDefaultS = 60;
-  static constexpr std::uint32_t kMaxS = 600;
+  static constexpr std::uint32_t kDefaultS = 60;  ///< lease_s を省いたときの秒数
+  static constexpr std::uint32_t kMaxS = 600;     ///< lease_s の上限
 
   /// @brief cmd の lease_s から実際の秒数を決める。
   /// @param lease_s cmd の lease_s（省略なら std::nullopt）
@@ -33,13 +33,19 @@ class Lease {
   Lease(std::uint64_t start_ms, std::uint32_t lease_s) : start_ms_(start_ms), lease_s_(lease_s) {}
 
   /// @brief 期限切れの時刻（単調時計の ms）。
+  /// @return 単調時計の ms
   [[nodiscard]] std::uint64_t deadline_ms() const {
     return start_ms_ + static_cast<std::uint64_t>(lease_s_) * 1000U;
   }
   /// @brief 期限が切れたか（期限ちょうどで true）。
   /// @param now_ms いまの時刻（単調時計の ms）
+  /// @return 切れていれば true
   [[nodiscard]] bool expired(std::uint64_t now_ms) const { return now_ms >= deadline_ms(); }
+  /// @brief リースの秒数。
+  /// @return 秒数
   [[nodiscard]] std::uint32_t lease_s() const { return lease_s_; }
+  /// @brief 受信時刻。
+  /// @return 単調時計の ms
   [[nodiscard]] std::uint64_t start_ms() const { return start_ms_; }
 
  private:

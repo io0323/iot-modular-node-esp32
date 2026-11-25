@@ -12,9 +12,9 @@ namespace node::support {
 template <typename T, std::size_t N>
 class StaticVector {
  public:
-  using value_type = T;
-  using iterator = T*;
-  using const_iterator = const T*;
+  using value_type = T;            ///< 要素の型
+  using iterator = T*;             ///< 反復子
+  using const_iterator = const T*;  ///< 読むだけの反復子
 
   /// @brief 末尾に足す。
   /// @param value 足す値
@@ -42,21 +42,51 @@ class StaticVector {
   /// @brief 全部消す。
   void clear() { size_ = 0; }
 
+  /// @brief 要素の数。
+  /// @return 数
   [[nodiscard]] std::size_t size() const { return size_; }
+  /// @brief 容量。
+  /// @return N
   [[nodiscard]] static constexpr std::size_t capacity() { return N; }
+  /// @brief 空か。
+  /// @return 空なら true
   [[nodiscard]] bool empty() const { return size_ == 0; }
+  /// @brief いっぱいか。
+  /// @return いっぱいなら true
   [[nodiscard]] bool full() const { return size_ == N; }
 
+  /// @brief 要素。
+  /// @param i 位置（size() 未満）
+  /// @return 要素
   T& operator[](std::size_t i) { return data_[i]; }
+  /// @brief 要素（読むだけ）。
+  /// @param i 位置（size() 未満）
+  /// @return 要素
   const T& operator[](std::size_t i) const { return data_[i]; }
+  /// @brief 先頭の要素（空でないこと）。
+  /// @return 要素
   T& front() { return data_[0]; }
+  /// @brief 先頭の要素（読むだけ。空でないこと）。
+  /// @return 要素
   [[nodiscard]] const T& front() const { return data_[0]; }
+  /// @brief 末尾の要素（空でないこと）。
+  /// @return 要素
   T& back() { return data_[size_ - 1]; }
+  /// @brief 末尾の要素（読むだけ。空でないこと）。
+  /// @return 要素
   [[nodiscard]] const T& back() const { return data_[size_ - 1]; }
 
+  /// @brief 先頭の反復子。
+  /// @return 反復子
   iterator begin() { return data_.data(); }
+  /// @brief 末尾の次の反復子。
+  /// @return 反復子
   iterator end() { return data_.data() + size_; }
+  /// @brief 先頭の反復子（読むだけ）。
+  /// @return 反復子
   [[nodiscard]] const_iterator begin() const { return data_.data(); }
+  /// @brief 末尾の次の反復子（読むだけ）。
+  /// @return 反復子
   [[nodiscard]] const_iterator end() const { return data_.data() + size_; }
 
  private:

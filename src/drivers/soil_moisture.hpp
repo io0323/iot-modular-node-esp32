@@ -44,12 +44,19 @@ struct SoilCalibration {
 /// @brief 土壌水分センサーのドライバ。
 class SoilMoisture final : public domain::ISensor {
  public:
+  /// @brief ドライバを作る。
+  /// @param adc ADC
+  /// @param adc_channel ADC のチャネル
+  /// @param cal 校正値（乾いたとき・水中の生値）
+  /// @param channel チャネル（soil の1つ）
+  /// @param period 計測の周期
   SoilMoisture(hal::IAdc& adc, hal::Pin adc_channel, SoilCalibration cal,
                std::span<const domain::ChannelSpec, 1> channel, std::chrono::milliseconds period)
       : adc_(adc), adc_channel_(adc_channel), cal_(cal), channel_(channel), period_(period) {}
 
   [[nodiscard]] std::string_view id() const override { return "soil_moisture"; }
   support::Result<void> init() override { return support::ok(); }
+  /// @copydoc domain::ISensor::read
   support::Result<std::size_t> read(std::span<domain::Reading> out) override {
     if (out.empty()) {
       return support::make_error(support::ErrorCode::BufferFull, "reading buffer too small");

@@ -11,6 +11,7 @@ class IClock {
  public:
   virtual ~IClock() = default;
   /// @brief 単調時計（ms）。経過時間・リース・周期・イベントの発生時刻に使う。
+  /// @return 起動からの ms
   [[nodiscard]] virtual std::uint64_t monotonic_ms() const = 0;
 };
 

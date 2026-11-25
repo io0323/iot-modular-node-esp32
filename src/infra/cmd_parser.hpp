@@ -20,26 +20,26 @@ enum class OpKind : std::uint8_t { SetActuator, Release, SetMode, SetParam, GetS
 
 /// @brief 読んだ cmd の payload。値の範囲（level の 0–1000 など）は CommandService が確かめる。
 struct CmdRequest {
-  support::FixedString<26> cmd_id;
+  support::FixedString<26> cmd_id;  ///< cmd_id（ULID）
 
-  FieldState op_state{FieldState::Absent};
-  OpKind op{OpKind::Unknown};
+  FieldState op_state{FieldState::Absent};  ///< op（文字列）
+  OpKind op{OpKind::Unknown};               ///< op の種類
 
-  FieldState priority_state{FieldState::Absent};
-  domain::Priority priority{domain::Priority::Auto};
+  FieldState priority_state{FieldState::Absent};      ///< priority（列挙値の文字列）
+  domain::Priority priority{domain::Priority::Auto};  ///< priority
 
   FieldState args_state{FieldState::Absent};   ///< args がオブジェクトか
   FieldState id_state{FieldState::Absent};     ///< args.id（snake_case の文字列）
-  support::FixedString<32> id;
+  support::FixedString<32> id;                 ///< args.id
   FieldState level_state{FieldState::Absent};  ///< args.level（整数）
-  std::int64_t level{0};
+  std::int64_t level{0};                       ///< args.level
   FieldState mode_state{FieldState::Absent};   ///< args.mode（空でない文字列）
-  support::FixedString<32> mode;
+  support::FixedString<32> mode;               ///< args.mode
 
   FieldState lease_state{FieldState::Absent};  ///< lease_s（整数）
-  std::int64_t lease_s{0};
+  std::int64_t lease_s{0};                     ///< lease_s
   FieldState expires_state{FieldState::Absent};  ///< expires_at（ts の形）
-  std::int64_t expires_at_ms{0};
+  std::int64_t expires_at_ms{0};                 ///< expires_at（UTC の ms）
   FieldState origin_state{FieldState::Absent};   ///< origin（kind・ref が文字列のオブジェクト）
 };
 
@@ -62,9 +62,9 @@ constexpr std::string_view to_string(DiscardReason r) {
 
 /// @brief parse_cmd の結果。
 struct ParsedCmd {
-  bool ok{false};
+  bool ok{false};                                 ///< 読めたか
   DiscardReason discard{DiscardReason::NotJson};  ///< ok が false のときの理由
-  CmdRequest request{};
+  CmdRequest request{};                           ///< 読めた中身（ok が true のとき）
 };
 
 /// @brief cmd の電文を jsmn でトークンに分け、エンベロープの形を確かめて CmdRequest に詰める。ヒープを使わない。

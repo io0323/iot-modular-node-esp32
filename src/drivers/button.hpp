@@ -16,9 +16,12 @@ namespace node::drivers {
 /// @brief ボタン。poll を 20ms ごとに呼ぶ。
 class Button final : public domain::IButton {
  public:
-  static constexpr std::uint32_t kStableSamples = 3;
-  static constexpr std::uint64_t kLongPressMs = 1000;
+  static constexpr std::uint32_t kStableSamples = 3;  ///< 同じ値が続いたら判定する回数（#41）
+  static constexpr std::uint64_t kLongPressMs = 1000;  ///< 長押しの時間（#41）
 
+  /// @brief ドライバを作る。
+  /// @param gpio GPIO
+  /// @param pin ボタンのピン
   /// @param active_low 押すと Low なら true（既定。内部プルアップ）
   Button(hal::IGpio& gpio, hal::Pin pin, bool active_low = true) : gpio_(gpio), pin_(pin), active_low_(active_low) {}
 

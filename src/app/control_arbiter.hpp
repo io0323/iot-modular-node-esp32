@@ -24,8 +24,8 @@ namespace node::app {
 /// 具体的なインターロックのクラスや機器 ID は知らない（IInterlock と構成表だけで扱う）。
 class ControlArbiter {
  public:
-  static constexpr std::size_t kMaxActuators = 8;
-  static constexpr std::size_t kMaxInterlocksPerActuator = 4;
+  static constexpr std::size_t kMaxActuators = 8;              ///< 扱えるアクチュエーターの数
+  static constexpr std::size_t kMaxInterlocksPerActuator = 4;  ///< 1台にかけられるインターロックの数
 
   /// @brief インターロックの遷移（INTERLOCK_ACTIVE／RELEASED の元）。
   struct InterlockChange {
@@ -33,12 +33,13 @@ class ControlArbiter {
     std::string_view rule;  ///< インターロックの rule
     bool active{false};     ///< true：効いて出力を変えた、false：解けた
   };
+  /// @brief 1周分のインターロックの遷移。
   using InterlockChanges = support::StaticVector<InterlockChange, kMaxActuators * kMaxInterlocksPerActuator>;
 
   /// @brief set_command の結果（ack の applied・limited）。
   struct CommandResult {
-    domain::Level applied{0};
-    bool limited{false};
+    domain::Level applied{0};  ///< 出力した値
+    bool limited{false};       ///< 安全制限で丸めたか
   };
 
   /// @brief 調停の対象を登録する。全アクチュエーターを0にして始める（起動直後は停止）。
@@ -47,37 +48,73 @@ class ControlArbiter {
   ControlArbiter(std::span<const domain::ActuatorBinding> actuators, const domain::ReadingStore& store);
 
   /// @brief ID からアクチュエーターの番号を探す。
+  /// @param id アクチュエーターの ID
+  /// @return 番号。なければ std::nullopt
   [[nodiscard]] std::optional<std::size_t> find(std::string_view id) const;
 
   /// @brief 上位指令を登録し、すぐに出力を決める。
+  /// @param index アクチュエーターの番号
+  /// @param level 出力（0–1000‰。範囲外は丸める）
+  /// @param priority 指令の priority
+  /// @param lease_s リースの秒数
+  /// @param now_ms いまの単調時計
+  /// @param changes インターロックの遷移の書き込み先
   /// @return 出力した値と、安全制限で丸めたか（範囲外・インターロック・lease_s が max_on_s を超える）
   CommandResult set_command(std::size_t index, domain::Level level, domain::Priority priority,
                             std::uint32_t lease_s, std::uint64_t now_ms, InterlockChanges& changes);
   /// @brief 上位指令を解除し、すぐに出力を決める。
+  /// @param index アクチュエーターの番号
+  /// @param now_ms いまの単調時計
+  /// @param changes インターロックの遷移の書き込み先
   void release(std::size_t index, std::uint64_t now_ms, InterlockChanges& changes);
 
   /// @brief 本体の手動操作の値を決める（std::nullopt で消す）。手動の段が有効なときだけ効く。
+  /// @param index アクチュエーターの番号
+  /// @param level 出力（0–1000‰）
   void set_manual(std::size_t index, std::optional<domain::Level> level);
   /// @brief 本体の手動操作の値をすべて消す。
   void clear_manual();
   /// @brief ローカルルールの提案を決める（std::nullopt で提案なし）。ルールの段が有効なときだけ効く。
+  /// @param index アクチュエーターの番号
+  /// @param level 提案の出力（0–1000‰）
   void set_rule_proposal(std::size_t index, std::optional<domain::Level> level);
   /// @brief どの段を有効にするか（モードで決まる）。
+  /// @param manual_enabled 手動の段を有効にするか
+  /// @param rules_enabled ルールの段を有効にするか
   void set_stages(bool manual_enabled, bool rules_enabled);
 
   /// @brief このアクチュエーターへの set_actuator を rejected（unsafe）にするか（禁止中のインターロックがある）。
+  /// @param index アクチュエーターの番号
+  /// @param now_ms いまの単調時計
+  /// @return 禁止中なら true
   [[nodiscard]] bool rejects_commands(std::size_t index, std::uint64_t now_ms) const;
 
   /// @brief リースの期限・インターロック・各段を見て、全アクチュエーターの出力を決め直す。
+  /// @param now_ms いまの単調時計
+  /// @param changes インターロックの遷移の書き込み先
   void tick(std::uint64_t now_ms, InterlockChanges& changes);
 
+  /// @brief アクチュエーターの台数。
+  /// @return 台数
   [[nodiscard]] std::size_t size() const { return slots_.size(); }
+  /// @brief アクチュエーターの仕様。
+  /// @param i 番号
+  /// @return 仕様
   [[nodiscard]] const domain::ActuatorSpec& spec(std::size_t i) const { return slots_[i].actuator->spec(); }
+  /// @brief いまの出力。
+  /// @param i 番号
+  /// @return 出力（0–1000‰）
   [[nodiscard]] domain::Level output(std::size_t i) const { return slots_[i].output; }
+  /// @brief いまの出力を決めた段。
+  /// @param i 番号
+  /// @return owner
   [[nodiscard]] domain::Owner owner(std::size_t i) const { return slots_[i].owner; }
-  /// @brief 本体の手動操作の値（なければ std::nullopt）。
+  /// @brief 本体の手動操作の値。
+  /// @param i 番号
+  /// @return 値（なければ std::nullopt）
   [[nodiscard]] std::optional<domain::Level> manual(std::size_t i) const { return slots_[i].manual; }
   /// @brief 出力に失敗した回数（診断用）。
+  /// @return 回数
   [[nodiscard]] std::uint32_t apply_errors() const { return apply_errors_; }
 
  private:

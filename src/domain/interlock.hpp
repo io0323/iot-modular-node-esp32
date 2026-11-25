@@ -29,12 +29,17 @@ class IInterlock {
  public:
   virtual ~IInterlock() = default;
   /// @brief イベントの detail.rule に入れる ID（例："max_on_s"）。
+  /// @return ID
   [[nodiscard]] virtual std::string_view rule() const = 0;
   /// @brief 状態を進めて判定する。10ms ごとなど周期的に呼ぶ。
+  /// @param in 計測値・要求・時刻
+  /// @return 強制値と上限（なければ空）
   virtual InterlockVerdict evaluate(const InterlockInput& in) = 0;
   /// @brief 条件が成り立っているか（直前の evaluate の結果）。
+  /// @return 成り立っていれば true
   [[nodiscard]] virtual bool engaged() const = 0;
   /// @brief このアクチュエーターへの set_actuator を rejected（unsafe）にするか（禁止中）。
+  /// @return 禁止中なら true（既定は false）
   [[nodiscard]] virtual bool rejects_commands(const ReadingStore& /*store*/, std::uint64_t /*now_ms*/) const {
     return false;
   }

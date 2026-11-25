@@ -18,32 +18,48 @@ class FakeI2cDevice {
  public:
   virtual ~FakeI2cDevice() = default;
   /// @brief マスターが書いたバイト列を受ける。
+  /// @param data 書かれたバイト列
   virtual void on_write(std::span<const std::uint8_t> data) = 0;
   /// @brief マスターが読むバイト列を返す。
+  /// @param out 読ませるバイトの書き込み先
   virtual void on_read(std::span<std::uint8_t> out) = 0;
 };
 
 /// @brief フェイクの I2C バス。
 class FakeI2cBus final : public hal::II2cBus {
  public:
-  static constexpr std::size_t kMaxDevices = 4;
+  static constexpr std::size_t kMaxDevices = 4;  ///< つなげる機器の数
 
   /// @brief 機器をつなぐ。
+  /// @param addr 7 ビットのアドレス
+  /// @param dev 機器
+  /// @return つなげる数を超えたら false
   bool attach(std::uint8_t addr, FakeI2cDevice& dev) {
     return devices_.push_back(Entry{addr, &dev});
   }
 
   /// @brief このアドレスへの通信を NACK にする（true の間）。
+  /// @param addr 7 ビットのアドレス
+  /// @param nack NACK にするなら true
   void set_nack(std::uint8_t addr, bool nack) { set_flag(addr, nack, false); }
   /// @brief このアドレスへの通信をタイムアウトにする（true の間）。
+  /// @param addr 7 ビットのアドレス
+  /// @param timeout タイムアウトにするなら true
   void set_timeout(std::uint8_t addr, bool timeout) { set_flag(addr, timeout, true); }
   /// @brief バスのハング（recover() が呼ばれるまで全アドレスの通信が失敗する）。
   void hang() { hung_ = true; }
   /// @brief 次の n 回の通信を失敗させる。
+  /// @param n 回数
   void fail_next(std::uint32_t n) { fail_next_ = n; }
 
+  /// @brief recover() が呼ばれた回数。
+  /// @return 回数
   [[nodiscard]] std::uint32_t recover_count() const { return recover_count_; }
+  /// @brief 通信の回数（失敗も数える）。
+  /// @return 回数
   [[nodiscard]] std::uint32_t transfer_count() const { return transfers_; }
+  /// @brief 最後の通信のタイムアウト。
+  /// @return タイムアウト（ms）
   [[nodiscard]] std::uint32_t last_timeout_ms() const { return last_timeout_ms_; }
 
   support::Result<void> write_read(std::uint8_t addr, std::span<const std::uint8_t> tx, std::span<std::uint8_t> rx,
@@ -114,8 +130,13 @@ class FakeI2cBus final : public hal::II2cBus {
 /// @brief フェイクの ADC。
 class FakeAdc final : public hal::IAdc {
  public:
-  static constexpr std::size_t kChannels = 8;
+  static constexpr std::size_t kChannels = 8;  ///< チャネルの数
+  /// @brief 読ませる生値を決める。
+  /// @param ch チャネル
+  /// @param raw 生値
   void set_raw(hal::Pin ch, std::uint16_t raw) { raw_[ch % kChannels] = raw; }
+  /// @brief 読めなくする・戻す。
+  /// @param fault 読めなくするなら true
   void set_fault(bool fault) { fault_ = fault; }
   support::Result<std::uint16_t> read_raw(hal::Pin ch) override {
     if (fault_) {
@@ -132,12 +153,13 @@ class FakeAdc final : public hal::IAdc {
 /// @brief フェイクの PWM。チャネルごとの設定とデューティを覚える。
 class FakePwm final : public hal::IPwm {
  public:
-  static constexpr std::size_t kChannels = 8;
+  static constexpr std::size_t kChannels = 8;  ///< チャネルの数
+  /// @brief チャネルの設定とデューティ。
   struct Channel {
-    std::uint32_t freq_hz{0};
-    std::uint8_t resolution_bits{0};
-    std::uint32_t duty{0};
-    bool configured{false};
+    std::uint32_t freq_hz{0};          ///< 周波数（Hz）
+    std::uint8_t resolution_bits{0};   ///< 分解能（ビット）
+    std::uint32_t duty{0};             ///< デューティ
+    bool configured{false};            ///< configure を呼んだか
   };
   support::Result<void> configure(hal::Pin ch, std::uint32_t freq_hz, std::uint8_t bits) override {
     Channel& c = ch_[ch % kChannels];
@@ -154,6 +176,9 @@ class FakePwm final : public hal::IPwm {
     c.duty = duty;
     return support::ok();
   }
+  /// @brief チャネルの設定とデューティ。
+  /// @param ch チャネル
+  /// @return 設定とデューティ
   [[nodiscard]] const Channel& channel(hal::Pin ch) const { return ch_[ch % kChannels]; }
 
  private:
@@ -163,8 +188,13 @@ class FakePwm final : public hal::IPwm {
 /// @brief フェイクの GPIO。入力の値はテストから決め、出力は覚える。
 class FakeGpio final : public hal::IGpio {
  public:
-  static constexpr std::size_t kPins = 16;
-  enum class Mode : std::uint8_t { Unset, InputPullup, Output };
+  static constexpr std::size_t kPins = 16;  ///< ピンの数
+  /// @brief ピンの向き。
+  enum class Mode : std::uint8_t {
+    Unset,        ///< 設定していない
+    InputPullup,  ///< 内部プルアップつきの入力
+    Output,       ///< 出力
+  };
 
   support::Result<void> configure_input_pullup(hal::Pin p) override {
     pins_[p % kPins].mode = Mode::InputPullup;
@@ -185,8 +215,16 @@ class FakeGpio final : public hal::IGpio {
     return support::ok();
   }
   /// @brief 入力の値を決める（ボタンを押す・離す）。
+  /// @param p ピン
+  /// @param high High にするなら true
   void set_level(hal::Pin p, bool high) { pins_[p % kPins].level = high; }
+  /// @brief ピンの値（入力に決めた値か、最後に出力した値）。
+  /// @param p ピン
+  /// @return High なら true
   [[nodiscard]] bool level(hal::Pin p) const { return pins_[p % kPins].level; }
+  /// @brief ピンの向き。
+  /// @param p ピン
+  /// @return 向き
   [[nodiscard]] Mode mode(hal::Pin p) const { return pins_[p % kPins].mode; }
 
  private:
@@ -210,8 +248,14 @@ class FakeMutex final : public hal::IMutex {
     return true;
   }
   void unlock() override { locked_ = false; }
+  /// @brief いつも取れないようにする・戻す。
+  /// @param v 取れないようにするなら true
   void set_always_busy(bool v) { always_busy_ = v; }
+  /// @brief 取られているか。
+  /// @return 取られていれば true
   [[nodiscard]] bool locked() const { return locked_; }
+  /// @brief 最後の try_lock_for のタイムアウト。
+  /// @return タイムアウト（ms）
   [[nodiscard]] std::uint32_t last_timeout_ms() const { return last_timeout_ms_; }
 
  private:
@@ -228,6 +272,8 @@ class FakeTimer final : public hal::ITimer {
     now_ms_ += ms;
     total_delay_ms_ += ms;
   }
+  /// @brief delay_ms で待った時間の合計。
+  /// @return 合計（ms）
   [[nodiscard]] std::uint64_t total_delay_ms() const { return total_delay_ms_; }
 
  private:
