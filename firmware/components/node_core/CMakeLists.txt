@@ -33,6 +33,7 @@ idf_component_register(
     "${S}/app/node.cpp"
     "${S}/drivers/bme280.cpp"
     "${S}/drivers/bh1750.cpp"
+    "${S}/drivers/sht31.cpp"
     "${S}/drivers/ssd1306.cpp"
     "${S}/drivers/sensor_io.cpp"
     "${S}/drivers/ui_io.cpp"

@@ -14,3 +14,4 @@
 NODE_FAKE_I2C(drivers::fake::FakeBme280Device, bme280_device, kAddrBme280)
 NODE_FAKE_I2C_ARGS(drivers::fake::FakeBh1750Device, bh1750_device, (timer), kAddrBh1750)
 NODE_FAKE_I2C(drivers::fake::FakeSsd1306Device, ssd1306_device, kAddrSsd1306)
+NODE_FAKE_I2C_ARGS(drivers::fake::FakeSht31Device, sht31_device, (timer), drivers::Sht31::kAddrA)

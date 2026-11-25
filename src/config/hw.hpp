@@ -14,6 +14,7 @@
 #include "drivers/bh1750.hpp"
 #include "drivers/bme280.hpp"
 #include "drivers/button.hpp"
+#include "drivers/sht31.hpp"
 #include "drivers/soil_moisture.hpp"
 #include "drivers/ssd1306.hpp"
 #include "hal/hal.hpp"
